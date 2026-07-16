@@ -1,0 +1,4 @@
+@startuml render-page-dark
+!include _seq-dark.iuml
+!include _render-page.iuml
+@enduml

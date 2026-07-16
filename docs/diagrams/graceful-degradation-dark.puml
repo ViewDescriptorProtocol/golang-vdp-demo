@@ -1,0 +1,4 @@
+@startuml graceful-degradation-dark
+!include _seq-dark.iuml
+!include _graceful-degradation.iuml
+@enduml

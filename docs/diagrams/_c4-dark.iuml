@@ -1,0 +1,13 @@
+' Dark palette for the C4 diagrams, tuned to GitHub's dark canvas (#0d1117).
+' Included by the C4 *-dark.puml wrappers AFTER <C4/...> so these win.
+' The element boxes (Person/Container/Component) already carry white text on
+' blue, which reads on dark — only the canvas, title, boundaries, relationship
+' labels and legend need lightening.
+skinparam backgroundColor #0d1117
+skinparam TitleFontColor #e6edf3
+skinparam LegendBackgroundColor #161b22
+skinparam LegendFontColor #c9d1d9
+skinparam LegendBorderColor #30363d
+
+UpdateBoundaryStyle($fontColor="#e6edf3", $borderColor="#8b949e")
+UpdateRelStyle($lineColor="#8b949e", $textColor="#c9d1d9")

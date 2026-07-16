@@ -1,0 +1,32 @@
+' Shared body for the C4 component view (light + dark wrappers include this
+' after pulling in <C4/C4_Component> and setting the palette).
+title C4 Component view — inside the BFF (the VDP client)
+
+Person(visitor, "Visitor", "Web browser")
+
+System_Boundary(demo, "golang-vdp-demo") {
+
+  Container_Boundary(bff, "BFF") {
+    Component(handler, "Page handler", "Go · server/bff.go", "Maps each browser route to one API endpoint and orchestrates the pipeline. Owns the http.Client and caches one resolver per origin.")
+    Component(extractor, "Descriptor extractor", "Go · vdp/transport.go", "Pulls the view descriptor out of whichever §4 transport carried it (_view/_views, Link, View-Template) and resolves base URLs (§5.4).")
+    Component(resolver, "Resolver", "Go · vdp/resolve.go", "Runs the §8 walk: fetch the descriptor if it is a reference, fetch the root template, recurse into slots. Enforces the §10 allowlist and caches templates by URL (§5.2).")
+    Component(renderer, "Renderer", "Go · render", "Binds the resolved template tree to the API data with html/template — where a slot gets its Go spelling (§6).")
+    Component(chrome, "Shell / chrome", "Go · server/shell.go · *.html", "Wraps the rendered body in the page shell and trace panel, and supplies the raw-data fallback when nothing composed (§9.4).")
+  }
+}
+
+Container(api, "API", "Go · net/http", "Data + view descriptors + discovery (§4, §5, §13)")
+Container(templates, "Template server", "Go · net/http", "Templates fetched by URL (§5.2)")
+
+Rel(visitor, handler, "Requests a page", "HTTP")
+Rel_Back(visitor, chrome, "Plain HTML")
+
+Rel(handler, api, "GET discovery, then the data payload", "HTTP (§13, §4)")
+Rel(handler, extractor, "Extract descriptor from the response")
+Rel(handler, resolver, "Fetch descriptor + resolve the tree")
+Rel(resolver, api, "GET standalone descriptor resource", "HTTP (§5)")
+Rel(resolver, templates, "GET templates by URL, allowlist-checked", "HTTP (§5.2, §10)")
+Rel(handler, renderer, "Render the tree with the data")
+Rel(handler, chrome, "Wrap body, or fall back to raw data")
+
+SHOW_LEGEND()

@@ -47,14 +47,20 @@ Go process here but talk only over HTTP, so the protocol is genuinely on the wir
 — the same separation you would deploy across a backend, a CDN and a client in
 production.
 
-![C4 container diagram of the BFF, API and template server, all speaking HTTP](docs/images/c4-container.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/c4-container-dark.svg">
+  <img alt="C4 container diagram of the BFF, API and template server, all speaking HTTP" src="docs/images/c4-container.svg">
+</picture>
 
 Inside the BFF — the VDP client — that work is a handful of components: a page
 handler that orchestrates, the `vdp` package's descriptor extractor and resolver,
 the `render` binding, and the shell chrome that wraps the result (or falls back
 to raw data). It maps directly onto the [code layout](#code-layout) below.
 
-![C4 component diagram of the BFF internals: page handler, extractor, resolver, renderer, shell chrome](docs/images/c4-component-bff.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/c4-component-bff-dark.svg">
+  <img alt="C4 component diagram of the BFF internals: page handler, extractor, resolver, renderer, shell chrome" src="docs/images/c4-component-bff.svg">
+</picture>
 
 Zooming in further, rendering `/dashboard` runs the §8 algorithm end to end. Each arrow below is a
 real HTTP request — discovery happens once per origin and seeds the trusted
@@ -62,18 +68,27 @@ allowlist, the descriptor arrives by `Link` header and is fetched as its own
 resource, then the root template and every slot are fetched by URL and composed.
 The browser only ever sees the resulting HTML.
 
-![Sequence diagram of the §8 resolution algorithm for /dashboard](docs/images/render-page.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/render-page-dark.svg">
+  <img alt="Sequence diagram of the §8 resolution algorithm for /dashboard" src="docs/images/render-page.svg">
+</picture>
 
 Composition is **best-effort** (§9): a broken slot is skipped so the rest of the
 page still renders, an untrusted template URL is refused outright, and only when
 the *root* template cannot be fetched does the client fall back to showing the
 raw API data instead of a blank page.
 
-![Sequence diagram of the §9 failure modes: slot skip, untrusted refusal, root fallback](docs/images/graceful-degradation.svg)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/graceful-degradation-dark.svg">
+  <img alt="Sequence diagram of the §9 failure modes: slot skip, untrusted refusal, root fallback" src="docs/images/graceful-degradation.svg">
+</picture>
 
 > Diagrams are generated from the PlantUML sources in [`docs/diagrams/`](docs/diagrams).
-> To regenerate after editing them (PlantUML resolves `-o` relative to each
-> source file, so `../images` lands them in `docs/images/`):
+> Each diagram is a shared body (`_name.iuml`) with light and dark wrappers
+> (`name.puml`, `name-dark.puml`); the `<picture>` elements above serve the dark
+> variant to readers in GitHub's dark theme. To regenerate after editing (the
+> glob renders every wrapper but not the `_*.iuml` includes; PlantUML resolves
+> `-o` relative to each source file, so `../images` lands them in `docs/images/`):
 > ```bash
 > /usr/bin/java -jar ~/.local/plantuml/plantuml.jar -tsvg -o ../images docs/diagrams/*.puml
 > ```

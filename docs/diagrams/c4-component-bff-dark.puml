@@ -1,5 +1,5 @@
-@startuml c4-component-bff
+@startuml c4-component-bff-dark
 !include <C4/C4_Component>
-skinparam backgroundColor #FFFFFF
+!include _c4-dark.iuml
 !include _c4-component-bff.iuml
 @enduml

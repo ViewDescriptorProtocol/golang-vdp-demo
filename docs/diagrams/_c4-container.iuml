@@ -1,0 +1,25 @@
+' Shared body for the C4 container view (light + dark wrappers include this
+' after pulling in <C4/C4_Container> and setting the palette).
+title C4 Container view — the three roles VDP relates
+
+Person(visitor, "Visitor", "Views a page in an ordinary web browser. Knows nothing about VDP — it only ever receives plain HTML.")
+
+System_Boundary(demo, "golang-vdp-demo") {
+  Container(bff, "BFF", "Go · net/http", "The VDP client. Runs the §8 resolution algorithm — extract descriptor, fetch it, fetch the root template, recurse into slots, render — and returns HTML (§7.5).")
+  Container(api, "API", "Go · net/http", "Returns data with a view descriptor attached (§4), serves standalone descriptor resources (§5), and advertises discovery + the trusted allowlist (§13).")
+  Container(templates, "Template server", "Go · net/http", "Serves templates as cacheable resources, fetched by URL like any other resource (§5.2).")
+}
+
+Rel(visitor, bff, "Requests a page", "HTTP")
+Rel_Back(visitor, bff, "Plain HTML")
+Rel(bff, api, "Discovery, then data + view descriptor", "HTTP (§4, §5, §13)")
+Rel(bff, templates, "Fetches templates by URL, trusted-allowlist checked", "HTTP (§5.2, §10)")
+
+note as N
+  In this demo the three containers run in **one Go process** and talk to each
+  other over real HTTP. In production they would be separate deployments — the
+  template server a CDN or git host, the API its own backend — which is exactly
+  the separation VDP is designed around.
+end note
+
+SHOW_LEGEND()

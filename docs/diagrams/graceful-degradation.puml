@@ -1,32 +1,4 @@
 @startuml graceful-degradation
-title Graceful degradation — prefer partial rendering over total failure (§9)
-
 skinparam backgroundColor #FFFFFF
-skinparam shadowing false
-skinparam sequenceMessageAlign center
-skinparam maxMessageSize 260
-autonumber
-
-actor Browser
-participant "BFF\n(VDP client)" as BFF
-participant "Template server\n/templates" as TS
-
-Browser -> BFF : GET /dashboard?fail=…
-
-alt a slot template 404s   (?fail=chart, §9.1)
-  BFF -> TS : GET /templates/…/does-not-exist.html
-  TS --> BFF : 404 Not Found
-  note right of BFF : Skip that slot. Its template's own\n{{else}} default shows; siblings render.
-  BFF --> Browser : the full page, minus the chart
-
-else a slot URL is untrusted   (?untrusted, §10)
-  note right of BFF : URL outside the allowlist —\nrefused, never fetched at all.
-  BFF --> Browser : the full page, minus the nav
-
-else the ROOT template 404s   (?fail=root, §9.4)
-  BFF -> TS : GET /templates/layouts/does-not-exist.html
-  TS --> BFF : 404 Not Found
-  note right of BFF : Nothing can be composed. Fall back to\nrendering the raw API data itself\n(rawDataFallback → fallback.html).
-  BFF --> Browser : fallback page — the data, not a blank screen
-end
+!include _graceful-degradation.iuml
 @enduml

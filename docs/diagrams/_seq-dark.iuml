@@ -1,0 +1,27 @@
+' Dark palette for the sequence diagrams, tuned to GitHub's dark canvas
+' (#0d1117). Included by the *-dark.puml wrappers before the shared body.
+skinparam backgroundColor #0d1117
+skinparam TitleFontColor #e6edf3
+
+skinparam defaultFontColor #c9d1d9
+skinparam ArrowColor #8b949e
+skinparam ArrowFontColor #c9d1d9
+
+skinparam ActorBorderColor #8b949e
+skinparam ActorBackgroundColor #161b22
+skinparam ActorFontColor #e6edf3
+
+skinparam ParticipantBorderColor #8b949e
+skinparam ParticipantBackgroundColor #161b22
+skinparam ParticipantFontColor #e6edf3
+
+skinparam SequenceLifeLineBorderColor #30363d
+
+skinparam NoteBackgroundColor #161b22
+skinparam NoteBorderColor #8b949e
+skinparam NoteFontColor #c9d1d9
+
+skinparam SequenceGroupBackgroundColor #161b22
+skinparam SequenceGroupBorderColor #8b949e
+skinparam SequenceGroupFontColor #e6edf3
+skinparam SequenceGroupHeaderFontColor #e6edf3

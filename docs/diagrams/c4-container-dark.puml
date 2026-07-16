@@ -1,5 +1,5 @@
-@startuml c4-container
+@startuml c4-container-dark
 !include <C4/C4_Container>
-skinparam backgroundColor #FFFFFF
+!include _c4-dark.iuml
 !include _c4-container.iuml
 @enduml

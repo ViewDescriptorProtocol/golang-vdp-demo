@@ -1,39 +1,4 @@
 @startuml render-page
-title How a page renders — the §8 resolution algorithm (/dashboard)
-
 skinparam backgroundColor #FFFFFF
-skinparam shadowing false
-skinparam sequenceMessageAlign center
-skinparam maxMessageSize 260
-autonumber
-
-actor Browser
-participant "BFF\n(VDP client)" as BFF
-participant "API\n/api · /views · /.well-known" as API
-participant "Template server\n/templates" as TS
-
-Browser -> BFF : GET /dashboard
-
-group First request to this origin — discovery (§13.2)
-  BFF -> API : GET /.well-known/vdp
-  API --> BFF : trustedTemplateDomains (§10)
-  note right of BFF : Resolver is built from the advertised\nallowlist, then cached per origin.
-end
-
-BFF -> API : GET /api/dashboard\nAccept: application/hal+json
-API --> BFF : 200 + clean data\nLink: <…/views/dashboard.json>; rel="view-descriptor" (§4.1)
-
-note right of BFF : Extract the descriptor from the\ntransport (§4) — here, a reference.
-
-BFF -> API : GET /views/dashboard.json (§5)
-API --> BFF : view descriptor — template + slots
-
-loop root template, then each slot depth-first (§8, §3.3)
-  BFF -> BFF : URL inside the trusted allowlist? (§10)
-  BFF -> TS : GET /templates/… (fetched by URL, cached §5.2)
-  TS --> BFF : template source
-end
-
-BFF -> BFF : render the composed tree with the API data (§6)
-BFF --> Browser : plain HTML — the browser never learns VDP exists
+!include _render-page.iuml
 @enduml
