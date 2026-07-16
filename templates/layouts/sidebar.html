@@ -1,0 +1,15 @@
+{{/*
+  Layout with two VDP slots. The view descriptor decides what fills them;
+  this template never names a sub-template (spec §2 "dynamic composition").
+
+  The {{with slot "x"}}...{{else}}...{{end}} form supplies default content for a
+  slot that was never filled, or one whose template failed to resolve (§9.1).
+*/}}
+<div class="layout">
+  <aside class="layout-side">
+    {{with slot "sidebarNav"}}{{.}}{{else}}<p class="slot-empty">sidebarNav slot is empty</p>{{end}}
+  </aside>
+  <section class="layout-main">
+    {{with slot "mainContent"}}{{.}}{{else}}<p class="slot-empty">mainContent slot is empty</p>{{end}}
+  </section>
+</div>

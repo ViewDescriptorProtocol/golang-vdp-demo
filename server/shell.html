@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>View Descriptor Protocol — Go demo</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script>
+    // Applies the saved theme before the first paint. Inline and blocking on
+    // purpose: deferring this would show a flash of the wrong theme.
+    try {
+      var saved = localStorage.getItem("vdp-theme");
+      if (saved === "light" || saved === "dark") {
+        document.documentElement.dataset.theme = saved;
+      }
+    } catch (e) {
+      // Storage can be unavailable (private mode, blocked cookies). The OS
+      // preference still applies, so there is nothing to recover from.
+    }
+  </script>
+</head>
+<body>
+  <div class="topbar">
+    {{if .Home}}<a class="home" href="/">&larr; demos</a>{{else}}<span></span>{{end}}
+    <div class="theme" role="group" aria-label="Colour theme">
+      <button type="button" data-set-theme="light">Light</button>
+      <button type="button" data-set-theme="dark">Dark</button>
+      <button type="button" data-set-theme="system">System</button>
+    </div>
+  </div>
+
+  {{/* Everything inside .page came from the resolved VDP template tree. */}}
+  <main class="page">{{.Body}}</main>
+
+  {{with .Trace}}
+  <details class="trace" open>
+    <summary>VDP trace — what the BFF just did</summary>
+
+    {{with .Error}}<p class="trace-error"><strong>Resolution failed:</strong> {{.}}</p>{{end}}
+
+    <div class="trace-grid">
+      <div>
+        <h3>1. Data request</h3>
+        <dl>
+          <dt>GET</dt><dd><code>{{.APIURL}}</code></dd>
+          <dt>Status</dt><dd><code>{{.Status}}</code></dd>
+          <dt>Content-Type</dt><dd><code>{{.ContentType}}</code></dd>
+          {{with .LinkHeader}}<dt>Link</dt><dd><code>{{.}}</code></dd>{{end}}
+          {{with .ViewTemplateHeader}}<dt>View-Template</dt><dd><code>{{.}}</code></dd>{{end}}
+        </dl>
+
+        <h3>2. Descriptor</h3>
+        <dl>
+          <dt>Transport (&sect;4.4)</dt><dd><code>{{.Transport}}</code></dd>
+          {{with .DescriptorURL}}<dt>Fetched from</dt><dd><code>{{.}}</code></dd>{{end}}
+          <dt>Base URL (&sect;5.4)</dt><dd><code>{{.BaseURL}}</code></dd>
+          {{if .ViewNames}}
+            <dt>Views offered</dt>
+            <dd>{{range .ViewNames}}<code>{{.}}</code> {{end}}</dd>
+            <dt>View used</dt>
+            <dd><code>{{if .ViewName}}{{.ViewName}}{{else}}default{{end}}</code></dd>
+          {{end}}
+        </dl>
+
+        <h3>3. Trusted templates (&sect;10)</h3>
+        <ul class="plain">
+          {{range .Trusted}}<li><code>{{.}}</code></li>{{end}}
+        </ul>
+        <p class="muted small">Advertised by <code>/.well-known/vdp</code> (&sect;13.2).</p>
+      </div>
+
+      <div>
+        <h3>4. Resolved template tree (&sect;8)</h3>
+        {{if .Tree}}<ul class="tree">{{.Tree}}</ul>{{else}}<p class="muted">No tree.</p>{{end}}
+
+        <h3>5. Resolution log</h3>
+        <table class="events">
+          <thead><tr><th>Depth</th><th>Event</th><th>Slot</th><th>Template</th></tr></thead>
+          <tbody>
+            {{range .Events}}
+            <tr class="{{if .Err}}event-err{{end}}">
+              <td>{{.Depth}}</td>
+              <td><code>{{.Kind}}</code></td>
+              <td>{{with .Slot}}<code>{{.}}</code>{{end}}</td>
+              <td>
+                <code>{{.URL}}</code>
+                {{with .Err}}<div class="event-msg">{{.}}</div>{{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {{with .Descriptor}}
+    <h3>View descriptor</h3>
+    <pre class="json">{{.}}</pre>
+    {{end}}
+  </details>
+  {{end}}
+
+  <script src="/static/theme.js"></script>
+</body>
+</html>

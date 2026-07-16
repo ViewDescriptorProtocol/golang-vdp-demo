@@ -1,0 +1,24 @@
+{{/*
+  Dashboard body. Sits inside the sidebar layout's mainContent slot and opens
+  three slots of its own — this is where the tree gets its depth (§3.3).
+*/}}
+<header class="page-head">
+  <h1>Dashboard</h1>
+  <p class="muted">Every region below arrived as a slot in the view descriptor.</p>
+</header>
+
+<div class="stack">
+  {{slot "statsCards"}}
+
+  {{/* §9.1: if this slot's template 404s the resolver skips it, and the
+       dashboard still renders with the note below in its place. */}}
+  {{with slot "revenueChart"}}{{.}}{{else}}
+    <div class="panel slot-failed">
+      <h2>Revenue</h2>
+      <p class="muted">Chart unavailable. The <code>revenueChart</code> slot failed to
+      resolve, so it was skipped and the rest of the tree rendered anyway (§9.1).</p>
+    </div>
+  {{end}}
+
+  {{slot "activityTable"}}
+</div>

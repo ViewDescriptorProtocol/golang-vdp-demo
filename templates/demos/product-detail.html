@@ -1,0 +1,10 @@
+{{/* Product detail — the "default" view of /api/products/42 (§7.4). */}}
+<article class="product">
+  <header class="page-head">
+    <h1>{{.name}}</h1>
+    <p class="price">{{money .price}}</p>
+  </header>
+  {{slot "gallery"}}
+  <p class="lede">{{.description}}</p>
+  {{with slot "reviews"}}{{.}}{{else}}<p class="muted">Reviews slot not filled.</p>{{end}}
+</article>

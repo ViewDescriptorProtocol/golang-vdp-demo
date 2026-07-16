@@ -1,0 +1,98 @@
+<header class="page-head">
+  <h1>View Descriptor Protocol <span class="brand-dim">&mdash; Go demo</span></h1>
+  <p class="lede">
+    One Go process playing three roles that talk to each other over real HTTP:
+    an <strong>API</strong> that attaches view descriptors to its data, a
+    <strong>template server</strong> that serves templates by URL, and a
+    <strong>BFF</strong> that resolves the template tree and renders the HTML you
+    are looking at (&sect;7.5).
+  </p>
+  <p class="muted">
+    Every page below carries a trace panel showing the descriptor it was rendered
+    from. Nothing in this demo hardcodes a template choice &mdash; the server
+    decides, the client obeys.
+  </p>
+</header>
+
+<div class="demos">
+  <a class="demo" href="/dashboard">
+    <h2>Dashboard</h2>
+    <p class="tagline">A composed template tree, four levels deep.</p>
+    <p class="muted">The descriptor is a standalone, cacheable resource referenced by a
+      <code>Link</code> header, and its template URLs are relative.</p>
+    <p class="spec">&sect;3.3 nesting &middot; &sect;4.1 Link header &middot; &sect;5 resources &middot; &sect;5.4 relative URLs</p>
+  </a>
+
+  <a class="demo" href="/login">
+    <h2>Login</h2>
+    <p class="tagline">One template, no composition.</p>
+    <p class="muted">The simplest case: the <code>View-Template</code> shorthand header
+      carries the whole thing.</p>
+    <p class="spec">&sect;3.1 basic structure &middot; &sect;4.1 shorthand &middot; &sect;7.1</p>
+  </a>
+
+  <a class="demo" href="/product/42">
+    <h2>Product</h2>
+    <p class="tagline">Two views over one payload.</p>
+    <p class="muted">Inline <code>_views</code> offering <code>default</code> and
+      <code>compact</code>. Same data, different template.</p>
+    <p class="spec">&sect;3.4 multiple views &middot; &sect;4.2 inline &middot; &sect;7.4</p>
+  </a>
+
+  <a class="demo" href="/feed">
+    <h2>Feed</h2>
+    <p class="tagline">One slot, three templates, in order.</p>
+    <p class="muted">A slot filled by an array of descriptors, rendered in sequence.</p>
+    <p class="spec">&sect;3.5 slot arrays &middot; &sect;4.2 inline <code>_view</code></p>
+  </a>
+
+  <a class="demo" href="/odata">
+    <h2>OData4</h2>
+    <p class="tagline">A body too rigid to touch.</p>
+    <p class="muted">The payload stays pure OData4; the descriptor travels entirely
+      out of band.</p>
+    <p class="spec">&sect;4.3 OData compatibility</p>
+  </a>
+</div>
+
+<div class="panel">
+  <h2>Failure modes</h2>
+  <p class="muted">VDP composition is best-effort: prefer partial rendering over total
+    failure (&sect;9). These links break the dashboard on purpose.</p>
+  <ul class="links">
+    <li><a href="/dashboard?fail=chart">?fail=chart</a>
+      &mdash; a slot's template 404s. The slot is skipped, the template's own default
+      content shows, and the rest of the page renders. (&sect;9.1)</li>
+    <li><a href="/dashboard?untrusted=1">?untrusted=1</a>
+      &mdash; a slot points at a template outside the trusted allowlist. The client
+      refuses to fetch it. (&sect;10)</li>
+    <li><a href="/dashboard?fail=root">?fail=root</a>
+      &mdash; the <em>root</em> template 404s. There is no tree to compose, so the
+      client falls back to the raw data. (&sect;9.4)</li>
+  </ul>
+</div>
+
+<div class="panel">
+  <h2>Look at the wire</h2>
+  <p class="muted">The protocol is just HTTP. Watch it directly:</p>
+  <pre class="shell"># The descriptor rides on a Link header; the body stays clean (&sect;4.1)
+curl -i localhost:8080/api/dashboard
+
+# The descriptor resource it points to (&sect;5)
+curl -i localhost:8080/views/dashboard.json
+
+# The shorthand header, for the single-template case (&sect;4.1)
+curl -i localhost:8080/api/login
+
+# Inline _views, offering two views of one payload (&sect;4.2)
+curl -s localhost:8080/api/products/42
+
+# Discovery: trusted template domains and prefetchable descriptors (&sect;13.2)
+curl -s localhost:8080/.well-known/vdp
+
+# VDP support advertised on OPTIONS (&sect;13.1)
+curl -i -X OPTIONS localhost:8080/api/dashboard
+
+# A template resource, fetched by URL like any other (&sect;5.2)
+curl -s localhost:8080/templates/layouts/sidebar.html</pre>
+</div>

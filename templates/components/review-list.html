@@ -1,0 +1,13 @@
+{{/* Review list, filling the product-detail "reviews" slot. */}}
+<section class="panel">
+  <h2>Reviews</h2>
+  {{range .reviews}}
+    <div class="review">
+      <p class="review-head">
+        <strong>{{.author}}</strong>
+        <span class="stars">{{.rating}}/5</span>
+      </p>
+      <p>{{.text}}</p>
+    </div>
+  {{end}}
+</section>

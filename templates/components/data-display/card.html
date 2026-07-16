@@ -1,0 +1,22 @@
+{{/*
+  Stat cards. Binds to the response's "stats" object.
+
+  Note what is NOT here: nothing told this template that it lives in the
+  "statsCards" slot, and nothing in the descriptor told it to read "stats".
+  Template selection is VDP's job; data binding is the template's (Design
+  Decision 3).
+*/}}
+<div class="cards">
+  <div class="card">
+    <span class="card-label">Revenue</span>
+    <span class="card-value">{{money .stats.revenue}}</span>
+  </div>
+  <div class="card">
+    <span class="card-label">Users</span>
+    <span class="card-value">{{number .stats.users}}</span>
+  </div>
+  <div class="card">
+    <span class="card-label">Orders</span>
+    <span class="card-value">{{number .stats.orders}}</span>
+  </div>
+</div>

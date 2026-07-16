@@ -1,0 +1,17 @@
+{{/*
+  Login form. This is the §7.1 case: a single template, no slots, delivered by
+  the View-Template shorthand header.
+*/}}
+<div class="panel form-panel">
+  <h1>Sign in</h1>
+  <form method="post" action="{{.loginUrl}}">
+    <input type="hidden" name="_csrf" value="{{.csrfToken}}">
+    {{range .fields}}
+      <label>
+        <span>{{.label}}</span>
+        <input type="{{.type}}" name="{{.name}}"{{if .required}} required{{end}}>
+      </label>
+    {{end}}
+    <button type="submit">Sign in</button>
+  </form>
+</div>

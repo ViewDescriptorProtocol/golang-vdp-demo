@@ -1,0 +1,19 @@
+{{/* Activity table. Binds to the response's "recentActivity" array. */}}
+<div class="panel">
+  <h2>Recent activity</h2>
+  <table>
+    <thead>
+      <tr><th>User</th><th>Action</th><th>Item</th><th>When</th></tr>
+    </thead>
+    <tbody>
+      {{range .recentActivity}}
+        <tr>
+          <td>{{.user}}</td>
+          <td><span class="tag">{{title .action}}</span></td>
+          <td>{{with .item}}{{.}}{{else}}<span class="muted">—</span>{{end}}</td>
+          <td class="muted">{{.time}}</td>
+        </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>

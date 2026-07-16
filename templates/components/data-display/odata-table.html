@@ -1,0 +1,26 @@
+{{/*
+  Product list for the OData4 demo (§7.3). Binds straight to OData's "value"
+  array — the body was never modified to accommodate VDP.
+*/}}
+<div class="panel">
+  <header class="page-head">
+    <h1>Products</h1>
+    <p class="muted">A pure OData4 payload. The descriptor reached the client by
+      <code>Link</code> header and <code>@View.descriptor</code> annotation, so the
+      body stayed untouched (&sect;4.3).</p>
+  </header>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Name</th><th>Price</th></tr>
+    </thead>
+    <tbody>
+      {{range .value}}
+        <tr>
+          <td>{{.ProductID}}</td>
+          <td>{{.Name}}</td>
+          <td>{{money .Price}}</td>
+        </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>

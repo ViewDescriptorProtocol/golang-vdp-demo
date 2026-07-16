@@ -1,0 +1,11 @@
+{{/*
+  Product card — the "compact" view of the same data (§7.4). Same response,
+  different template: the server offered both, the client picked one.
+*/}}
+<div class="card product-card">
+  <figure class="frame frame-sm"><span>{{index .images 0}}</span></figure>
+  <div>
+    <h2>{{.name}}</h2>
+    <p class="price">{{money .price}}</p>
+  </div>
+</div>

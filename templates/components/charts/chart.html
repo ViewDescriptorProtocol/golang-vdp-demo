@@ -1,0 +1,20 @@
+{{/*
+  Bar chart. Binds to the response's "chartData" object, and opens a nested
+  "legend" slot — a slot inside a slot inside a slot, which is how the tree
+  reaches arbitrary depth (§3.3).
+*/}}
+{{$labels := .chartData.labels}}
+{{$values := .chartData.values}}
+{{$peak := maxOf $values}}
+<div class="panel">
+  <h2>{{.chartData.series}}</h2>
+  <div class="chart">
+    {{range $i, $v := $values}}
+      <div class="chart-col">
+        <div class="chart-bar" style="height: {{pct $v $peak}}%"></div>
+        <span class="chart-label">{{index $labels $i}}</span>
+      </div>
+    {{end}}
+  </div>
+  {{slot "legend"}}
+</div>

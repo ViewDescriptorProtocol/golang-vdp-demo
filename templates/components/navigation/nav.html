@@ -1,0 +1,9 @@
+{{/* Navigation component. Binds to the response's "nav" array. */}}
+<nav class="nav">
+  <div class="brand">VDP <span class="brand-dim">go demo</span></div>
+  <ul>
+    {{range .nav}}
+      <li><a href="{{.href}}"{{if .active}} class="active"{{end}}>{{.label}}</a></li>
+    {{end}}
+  </ul>
+</nav>

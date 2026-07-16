@@ -1,0 +1,14 @@
+{{/*
+  Last-resort body (&sect;9.3/&sect;9.4): shown when no template tree can be
+  composed. With data, the client renders the data itself rather than an empty
+  page; without data there is nothing left to show.
+*/}}
+{{if .Data}}
+<div class="panel">
+  <h1>Fallback: raw API data</h1>
+  <p class="muted">The root template could not be resolved, so there is no tree to render. Per &sect;9.4 the client falls back to the data itself rather than showing nothing.</p>
+  <pre>{{.Data}}</pre>
+</div>
+{{else}}
+<div class="panel"><h1>Nothing to render</h1></div>
+{{end}}

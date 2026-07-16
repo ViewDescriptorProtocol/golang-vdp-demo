@@ -1,0 +1,5 @@
+{{/* Legend, filling the chart's nested "legend" slot (depth 4 of the tree). */}}
+<ul class="legend">
+  <li><span class="swatch"></span>{{.chartData.series}}</li>
+  <li class="muted">Peak {{number (maxOf .chartData.values)}}</li>
+</ul>

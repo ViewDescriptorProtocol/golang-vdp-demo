@@ -1,0 +1,10 @@
+# Build artifacts
+golang-vdp-demo
+/dist/
+*.test
+*.out
+
+# IDE
+.idea/
+*.iml
+.vscode/
