@@ -1,13 +1,27 @@
 ' Dark palette for the C4 diagrams, tuned to GitHub's dark canvas (#0d1117).
 ' Included by the C4 *-dark.puml wrappers AFTER <C4/...> so these win.
-' The element boxes (Person/Container/Component) already carry white text on
-' blue, which reads on dark — only the canvas, title, boundaries, relationship
-' labels and legend need lightening.
+' Person/Container boxes already carry white text on blue, which reads on
+' dark; Components default to black-on-light-blue, so they are restyled below.
+' Beyond that only the canvas, title, boundaries, relationship labels, notes
+' and legend need lightening.
 skinparam backgroundColor #0d1117
 skinparam TitleFontColor #e6edf3
 skinparam LegendBackgroundColor #161b22
 skinparam LegendFontColor #c9d1d9
 skinparam LegendBorderColor #30363d
 
+' SHOW_LEGEND() bakes its title in as an inline <color:...> tag, so the
+' LegendFontColor skinparam never reaches it — it needs C4's own variable.
+!$LEGEND_TITLE_COLOR = "#e6edf3"
+
+skinparam NoteBackgroundColor #161b22
+skinparam NoteBorderColor #8b949e
+skinparam NoteFontColor #c9d1d9
+
 UpdateBoundaryStyle($fontColor="#e6edf3", $borderColor="#8b949e")
 UpdateRelStyle($lineColor="#8b949e", $textColor="#c9d1d9")
+
+' Components: drop the default light blue + black text for white-on-blue,
+' pitched between the container blue (#438dd5) and the person navy (#08427b)
+' so the three levels stay distinguishable.
+UpdateElementStyle("component", $bgColor="#1d5d9e", $fontColor="#ffffff", $borderColor="#164a80")

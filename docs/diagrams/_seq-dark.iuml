@@ -7,15 +7,24 @@ skinparam defaultFontColor #c9d1d9
 skinparam ArrowColor #8b949e
 skinparam ArrowFontColor #c9d1d9
 
-skinparam ActorBorderColor #8b949e
-skinparam ActorBackgroundColor #161b22
+skinparam ActorBorderColor #c9d1d9
+skinparam ActorBackgroundColor #30363d
 skinparam ActorFontColor #e6edf3
 
 skinparam ParticipantBorderColor #8b949e
 skinparam ParticipantBackgroundColor #161b22
 skinparam ParticipantFontColor #e6edf3
 
-skinparam SequenceLifeLineBorderColor #30363d
+' Lifelines: skinparam can't change the 0.5px stroke width, and that thinness
+' is most of why they read as too dark — the style block below sets both.
+<style>
+sequenceDiagram {
+  lifeLine {
+    LineThickness 1.5
+    LineColor #8b949e
+  }
+}
+</style>
 
 skinparam NoteBackgroundColor #161b22
 skinparam NoteBorderColor #8b949e
