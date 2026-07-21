@@ -39,7 +39,7 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	api := &server.API{}
+	api := &server.API{Templates: templatesFS}
 	api.Routes(mux)
 
 	templates := &server.Templates{FS: templatesFS}

@@ -16,7 +16,7 @@ Browser -> BFF : GET /dashboard
 
 group First request to this origin — discovery (§13.2)
   BFF -> API : GET /.well-known/vdp
-  API --> BFF : trustedTemplateDomains (§10)
+  API --> BFF : trustedTemplateUrls (§10)
   note right of BFF : Resolver is built from the advertised\nallowlist, then cached per origin.
 end
 

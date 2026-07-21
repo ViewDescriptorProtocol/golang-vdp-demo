@@ -2,6 +2,9 @@ package vdp
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -258,20 +261,354 @@ func TestCheckTrustedPathBoundary(t *testing.T) {
 		{"http://cdn.example.com/templates/a.html", false}, // Scheme must match.
 	}
 	for _, tc := range tests {
-		err := r.checkTrusted(mustParse(t, tc.url))
+		err := r.checkTrusted(mustParse(t, tc.url), nil)
 		if (err == nil) != tc.allow {
 			t.Errorf("checkTrusted(%s): allowed = %v, want %v", tc.url, err == nil, tc.allow)
 		}
 	}
 }
 
-// §10: with no allowlist, nothing is trusted. Failing open would make the
-// allowlist an opt-in defence, which is the wrong default.
-func TestEmptyAllowlistTrustsNothing(t *testing.T) {
+// §10: when no allowlist is configured or advertised, the last step of the
+// source chain applies — only template URLs sharing an origin with the view
+// descriptor's base URL are trusted.
+func TestEmptyAllowlistSameOriginDefault(t *testing.T) {
 	r := NewResolver(nil, nil)
-	if err := r.checkTrusted(mustParse(t, "https://cdn.example.com/templates/a.html")); err == nil {
-		t.Error("empty allowlist trusted a template")
+	base := mustParse(t, "https://e.com/views/dashboard.json")
+	tests := []struct {
+		url   string
+		base  *url.URL
+		allow bool
+	}{
+		{"https://e.com/templates/a.html", base, true},
+		{"https://cdn.example.com/templates/a.html", base, false}, // Cross-origin.
+		{"http://e.com/templates/a.html", base, false},            // Scheme is part of the origin.
+		// With no base either, nothing can be established as trusted.
+		{"https://e.com/templates/a.html", nil, false},
 	}
+	for _, tc := range tests {
+		err := r.checkTrusted(mustParse(t, tc.url), tc.base)
+		if (err == nil) != tc.allow {
+			t.Errorf("checkTrusted(%s, base=%v): allowed = %v, want %v", tc.url, tc.base, err == nil, tc.allow)
+		}
+	}
+}
+
+// §10 chain end to end: a resolver with an empty allowlist resolves a tree
+// whose templates share the descriptor's origin, and rejects one that strays.
+func TestResolveSameOriginDefault(t *testing.T) {
+	ts := newTemplateServer(t, map[string]string{"/templates/layout.html": "layout"})
+	evil := newTemplateServer(t, map[string]string{"/templates/nav.html": "pwned"})
+	r := NewResolver(ts.Client(), nil)
+
+	base := mustParse(t, ts.URL+"/views/dashboard.json")
+	vd := ViewDescriptor{
+		Template: "../templates/layout.html",
+		Slots:    Slots{"nav": Single(ViewDescriptor{Template: evil.URL + "/templates/nav.html"})},
+	}
+	root, err := r.Resolve(context.Background(), vd, base, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if root.Body != "layout" {
+		t.Errorf("same-origin root should resolve, got %+v", root)
+	}
+	if _, ok := root.Slots["nav"]; ok {
+		t.Error("cross-origin slot was rendered under the same-origin default")
+	}
+	if n := evil.hitCount("/templates/nav.html"); n != 0 {
+		t.Errorf("cross-origin template was fetched %d times, want 0", n)
+	}
+}
+
+// §3.6: template bytes are verified against integrity metadata; a match renders
+// and a mismatch is a template fetch failure for that slot (§9.1).
+func TestResolveIntegrity(t *testing.T) {
+	ts := newTemplateServer(t, map[string]string{
+		"/templates/layout.html": "layout",
+		"/templates/card.html":   "card",
+	})
+	good := sriDigest("card")
+	bad := sriDigest("tampered")
+
+	t.Run("match renders", func(t *testing.T) {
+		r := NewResolver(ts.Client(), []string{ts.URL + "/templates"})
+		vd := ViewDescriptor{
+			Template: ts.URL + "/templates/layout.html",
+			Slots: Slots{
+				"main": Single(ViewDescriptor{Template: ts.URL + "/templates/card.html", Integrity: good}),
+			},
+		}
+		root, err := r.Resolve(context.Background(), vd, nil, nil)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if len(root.Slots["main"]) != 1 {
+			t.Error("verified slot should render")
+		}
+	})
+
+	t.Run("mismatch skips the slot", func(t *testing.T) {
+		r := NewResolver(ts.Client(), []string{ts.URL + "/templates"})
+		vd := ViewDescriptor{
+			Template: ts.URL + "/templates/layout.html",
+			Slots: Slots{
+				"main": Single(ViewDescriptor{Template: ts.URL + "/templates/card.html", Integrity: bad}),
+			},
+		}
+		tr := &Trace{}
+		root, err := r.Resolve(context.Background(), vd, nil, tr)
+		if err != nil {
+			t.Fatalf("an integrity failure in a slot must not fail the render: %v", err)
+		}
+		if _, ok := root.Slots["main"]; ok {
+			t.Error("slot with mismatched integrity was rendered")
+		}
+		if !hasEvent(tr, "integrity-failed") {
+			t.Error("integrity failure should be traced")
+		}
+	})
+
+	t.Run("mismatch at the root fails the render", func(t *testing.T) {
+		r := NewResolver(ts.Client(), []string{ts.URL + "/templates"})
+		vd := ViewDescriptor{Template: ts.URL + "/templates/layout.html", Integrity: bad}
+		if _, err := r.Resolve(context.Background(), vd, nil, nil); err == nil {
+			t.Fatal("root integrity mismatch should return an error")
+		}
+	})
+}
+
+// W3C SRI semantics: multiple tokens, strongest algorithm wins, unknown
+// algorithms and unparseable metadata are ignored.
+func TestVerifyIntegrity(t *testing.T) {
+	body := []byte("card")
+	sha256Good := sri256Digest("card")
+	tests := []struct {
+		name     string
+		metadata string
+		ok       bool
+	}{
+		{"sha384 match", sriDigest("card"), true},
+		{"sha384 mismatch", sriDigest("other"), false},
+		{"sha256 match", sha256Good, true},
+		{"any of several digests of one algorithm", sriDigest("other") + " " + sriDigest("card"), true},
+		// The strongest algorithm present is the one that must match.
+		{"strongest wins", sha256Good + " " + sriDigest("other"), false},
+		{"unknown algorithm ignored", "sha1-AAAA " + sriDigest("card"), true},
+		{"only unknown algorithms means no verification", "md5-AAAA whatever", true},
+		{"empty means no verification", "", true},
+		// SRI options after ? are ignored.
+		{"options ignored", sriDigest("card") + "?foo=bar", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := verifyIntegrity(tc.metadata, body)
+			if (err == nil) != tc.ok {
+				t.Errorf("verifyIntegrity(%q) = %v, want ok=%v", tc.metadata, err, tc.ok)
+			}
+		})
+	}
+}
+
+// §3.7: a slot may hold a descriptor reference. The referenced resource is
+// fetched and used as the slot's descriptor, and relative template URLs inside
+// it resolve against its own URL — not the referrer's base.
+func TestResolveDescriptorReference(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/templates/layout.html", serveText("layout"))
+	mux.HandleFunc("/templates/nav.html", serveText("nav"))
+	mux.HandleFunc("/views/nav.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", MediaType)
+		fmt.Fprint(w, `{"template":"../templates/nav.html"}`)
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	r := NewResolver(ts.Client(), []string{ts.URL + "/"})
+	base := mustParse(t, ts.URL+"/views/dashboard.json")
+	vd := ViewDescriptor{
+		Template: "../templates/layout.html",
+		Slots:    Slots{"sidebarNav": Reference("nav.json")},
+	}
+	tr := &Trace{}
+	root, err := r.Resolve(context.Background(), vd, base, tr)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	navNodes := root.Slots["sidebarNav"]
+	if len(navNodes) != 1 || navNodes[0].Body != "nav" {
+		t.Fatalf("referenced slot = %+v", navNodes)
+	}
+	if !hasEvent(tr, "descriptor-ref") {
+		t.Error("reference fetch should be traced")
+	}
+}
+
+// §3.7: a reference chain that revisits a descriptor URL is a cycle; the slot
+// is abandoned (§9.1) and the rest of the tree still renders.
+func TestResolveReferenceCycle(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/templates/layout.html", serveText("layout"))
+	mux.HandleFunc("/templates/a.html", serveText("a"))
+	mux.HandleFunc("/views/a.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", MediaType)
+		fmt.Fprint(w, `{"template":"../templates/a.html","slots":{"next":{"descriptor":"b.json"}}}`)
+	})
+	mux.HandleFunc("/views/b.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", MediaType)
+		fmt.Fprint(w, `{"template":"../templates/a.html","slots":{"next":{"descriptor":"a.json"}}}`)
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	r := NewResolver(ts.Client(), []string{ts.URL + "/"})
+	base := mustParse(t, ts.URL+"/views/dashboard.json")
+	vd := ViewDescriptor{
+		Template: "../templates/layout.html",
+		Slots:    Slots{"nav": Reference("a.json")},
+	}
+	tr := &Trace{}
+	root, err := r.Resolve(context.Background(), vd, base, tr)
+	if err != nil {
+		t.Fatalf("a cyclic reference must not fail the whole render: %v", err)
+	}
+	// a.json itself resolves; the cycle is detected when b.json points back.
+	if len(root.Slots["nav"]) != 1 {
+		t.Fatal("first hop of the chain should still render")
+	}
+	if !hasEvent(tr, "ref-cycle") {
+		t.Error("cycle should be traced")
+	}
+}
+
+// §3.7: the referenced resource must be a single ViewDescriptor; a multi-view
+// document in slot context is invalid (§9.3) and fails only that slot.
+func TestResolveReferenceMultiViewRejected(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/templates/layout.html", serveText("layout"))
+	mux.HandleFunc("/views/multi.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", MediaType)
+		fmt.Fprint(w, `{"views":{"default":{"template":"../templates/layout.html"}}}`)
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	r := NewResolver(ts.Client(), []string{ts.URL + "/"})
+	base := mustParse(t, ts.URL+"/views/dashboard.json")
+	vd := ViewDescriptor{
+		Template: "../templates/layout.html",
+		Slots:    Slots{"nav": Reference("multi.json")},
+	}
+	root, err := r.Resolve(context.Background(), vd, base, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if _, ok := root.Slots["nav"]; ok {
+		t.Error("multi-view reference should fail its slot")
+	}
+}
+
+// §3.7/§8: references count toward the recursion depth limit.
+func TestResolveReferenceCountsTowardDepth(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/templates/a.html", serveText("a"))
+	// Each ref-N.json nests one template and one further reference.
+	for i := range 6 {
+		mux.HandleFunc(fmt.Sprintf("/views/ref-%d.json", i), func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", MediaType)
+			fmt.Fprintf(w, `{"template":"../templates/a.html","slots":{"next":{"descriptor":"ref-%d.json"}}}`, i+1)
+		})
+	}
+	mux.HandleFunc("/views/ref-6.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", MediaType)
+		fmt.Fprint(w, `{"template":"../templates/a.html"}`)
+	})
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	r := NewResolver(ts.Client(), []string{ts.URL + "/"})
+	r.MaxDepth = 4
+	base := mustParse(t, ts.URL+"/views/dashboard.json")
+	vd := ViewDescriptor{
+		Template: "../templates/a.html",
+		Slots:    Slots{"next": Reference("ref-0.json")},
+	}
+	tr := &Trace{}
+	root, err := r.Resolve(context.Background(), vd, base, tr)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if root == nil {
+		t.Fatal("root should resolve")
+	}
+	if !hasEvent(tr, "depth-exceeded") {
+		t.Error("a reference chain longer than MaxDepth should hit the depth limit")
+	}
+}
+
+// §10: descriptor reference URLs are validated with the same allowlist chain as
+// template URLs — an untrusted reference is never fetched.
+func TestResolveReferenceUntrusted(t *testing.T) {
+	evil := newTemplateServer(t, map[string]string{"/views/nav.json": `{"template":"nav.html"}`})
+	ts := newTemplateServer(t, map[string]string{"/templates/layout.html": "layout"})
+
+	r := NewResolver(ts.Client(), []string{ts.URL + "/"})
+	base := mustParse(t, ts.URL+"/views/dashboard.json")
+	vd := ViewDescriptor{
+		Template: "../templates/layout.html",
+		Slots:    Slots{"nav": Reference(evil.URL + "/views/nav.json")},
+	}
+	root, err := r.Resolve(context.Background(), vd, base, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if _, ok := root.Slots["nav"]; ok {
+		t.Error("untrusted reference was resolved")
+	}
+	if n := evil.hitCount("/views/nav.json"); n != 0 {
+		t.Errorf("untrusted reference was fetched %d times, want 0", n)
+	}
+}
+
+// §5.5: when the resolver has a platform, descriptor fetches carry the
+// VDP-Platform header so the server can negotiate platform-specific views.
+func TestFetchDescriptorSendsPlatform(t *testing.T) {
+	var got string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get(HeaderPlatform)
+		w.Header().Set("Content-Type", MediaType)
+		fmt.Fprint(w, `{"template":"../templates/layout.html"}`)
+	}))
+	t.Cleanup(ts.Close)
+
+	r := NewResolver(ts.Client(), nil)
+	r.Platform = "web"
+	e := &Extraction{DescriptorURL: ts.URL + "/views/dashboard.json"}
+	if err := r.FetchDescriptor(context.Background(), e); err != nil {
+		t.Fatalf("FetchDescriptor: %v", err)
+	}
+	if got != "web" {
+		t.Errorf("VDP-Platform = %q, want %q", got, "web")
+	}
+}
+
+// serveText returns a handler serving a fixed template body.
+func serveText(body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		fmt.Fprint(w, body)
+	}
+}
+
+// sriDigest computes sha384 SRI metadata for a template body, as a server
+// publishing integrity metadata would (§3.6).
+func sriDigest(body string) string {
+	sum := sha512.Sum384([]byte(body))
+	return "sha384-" + base64.StdEncoding.EncodeToString(sum[:])
+}
+
+func sri256Digest(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return "sha256-" + base64.StdEncoding.EncodeToString(sum[:])
 }
 
 // §8: clients must bound recursion depth.

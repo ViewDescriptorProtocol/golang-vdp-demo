@@ -22,7 +22,7 @@ actually on the wire and visible to `curl`:
 |---------------------|-------------------|---------------------------------------------------------|
 | **API**             | `/api/…`          | Returns data with a view descriptor attached (§4)        |
 |                     | `/views/…`        | Standalone, cacheable view descriptor resources (§5)     |
-|                     | `/.well-known/vdp`| Discovery: trusted domains, prefetchable descriptors (§13)|
+|                     | `/.well-known/vdp`| Discovery: trusted URL prefixes, prefetchable descriptors (§13)|
 | **Template server** | `/templates/…`    | Serves templates, fetched by URL like any resource (§5.2) |
 | **BFF**             | `/`               | Resolves the template tree, renders HTML (§7.5, §8)      |
 
@@ -97,7 +97,7 @@ raw API data instead of a blank page.
 
 | Page            | Shows                                            | Spec                       |
 |-----------------|--------------------------------------------------|----------------------------|
-| `/dashboard`    | A template tree four levels deep, via `Link` header, with relative template URLs | §3.3, §4.1, §5, §5.4, §7.2 |
+| `/dashboard`    | A template tree four levels deep, via `Link` header, with relative template URLs; the nav arrives by descriptor reference and the chart legend is integrity-verified | §3.3, §3.6, §3.7, §4.1, §5, §5.4, §7.2 |
 | `/login`        | One template, no composition, `View-Template` shorthand | §3.1, §4.1, §7.1     |
 | `/product/42`   | Two views of one payload — add `?view=compact`    | §3.4, §4.2, §7.4           |
 | `/feed`         | One slot filled by three templates, in order     | §3.5                       |
@@ -107,11 +107,12 @@ raw API data instead of a blank page.
 
 VDP composition is best-effort: **prefer partial rendering over total failure**.
 
-| Link                       | What happens                                                              |
-|----------------------------|---------------------------------------------------------------------------|
-| `/dashboard?fail=chart`    | A slot's template 404s → slot skipped, its template's default content shows, rest of the page renders (§9.1) |
-| `/dashboard?untrusted=1`   | A slot points outside the trusted allowlist → never fetched (§10)          |
-| `/dashboard?fail=root`     | The *root* template 404s → nothing to compose, so fall back to raw data (§9.4) |
+| Link                        | What happens                                                              |
+|-----------------------------|---------------------------------------------------------------------------|
+| `/dashboard?fail=chart`     | A slot's template 404s → slot skipped, its template's default content shows, rest of the page renders (§9.1) |
+| `/dashboard?untrusted=1`    | The referenced nav descriptor names a template outside the trusted allowlist → never fetched (§10) |
+| `/dashboard?fail=integrity` | The legend's published SRI digest cannot match its bytes → treated as a fetch failure, slot skipped (§3.6, §9.1) |
+| `/dashboard?fail=root`      | The *root* template 404s → nothing to compose, so fall back to raw data (§9.4) |
 
 ## Look at the wire
 
@@ -122,10 +123,14 @@ curl -i localhost:8080/api/dashboard
 # The descriptor resource it points to (§5)
 curl -i localhost:8080/views/dashboard.json
 
+# The nav descriptor it references from a slot (§3.7)
+curl -i localhost:8080/views/nav.json
+
 # Inline _views, offering two views of one payload (§4.2)
 curl -s localhost:8080/api/products/42
 
-# Discovery (§13.2) and OPTIONS advertisement (§13.1)
+# Discovery (§13.2, served as application/vdp-discovery+json) and OPTIONS
+# advertisement (§13.1)
 curl -s localhost:8080/.well-known/vdp
 curl -i -X OPTIONS localhost:8080/api/dashboard
 ```
@@ -134,9 +139,11 @@ curl -i -X OPTIONS localhost:8080/api/dashboard
 
 ```
 vdp/          The protocol. Reusable, and free of template-engine knowledge.
-  descriptor.go  §3 format: ViewDescriptor, slots, multi-view, discovery doc
+  descriptor.go  §3 format: ViewDescriptor, slots, references, multi-view
   transport.go   §4 transports: _view/_views, Link, View-Template, precedence
   resolve.go     §8 resolution, §9 error handling, §10 allowlist, §5.4 base URLs
+  integrity.go   §3.6 template integrity verification (W3C SRI)
+  discovery.go   §13 discovery document, endpoint matching, media type
 render/       The html/template binding — where slots get a Go spelling.
 server/       The demo: api.go, templates.go, bff.go, and the shell chrome.
 templates/    The templates themselves, served over HTTP.
@@ -183,7 +190,9 @@ decision rather than an omission (spec Design Decisions 1–3):
   embedded only so the binary is self-contained; the resolver goes over the wire
   like any client would, and caches by URL (§5.2).
 - **The trusted allowlist comes from `/.well-known/vdp`**, not from a constant —
-  §13.2 feeding §10. An empty allowlist trusts nothing rather than everything.
+  §13.2 feeding §10, via the spec's source chain: local configuration first,
+  then the discovery document, and with neither only same-origin templates are
+  trusted.
 - **Slot resolution order is sorted.** VDP fixes order *within* an array slot
   (§3.5) but says nothing about slots themselves, and Go's random map iteration
   would otherwise make traces differ every run.

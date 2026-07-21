@@ -28,11 +28,18 @@ const LinkRel = "view-descriptor"
 // HeaderViewTemplate is the shorthand header for the single-template case (§4.1).
 const HeaderViewTemplate = "View-Template"
 
-// Headers advertising VDP support on OPTIONS responses (§13.1).
+// Headers advertising VDP support (§13.1). VDP-Version alone suffices to
+// signal support, and may appear on any response carrying a view descriptor
+// and on view descriptor resources themselves — not only on OPTIONS.
 const (
 	HeaderSupport = "VDP-Support"
 	HeaderVersion = "VDP-Version"
 )
+
+// HeaderPlatform carries the client's rendering platform so servers can
+// negotiate platform-specific view descriptors (§5.5). The name has no X-
+// prefix; that convention is deprecated by RFC 6648.
+const HeaderPlatform = "VDP-Platform"
 
 // Envelope is the inline body transport (§4.2). It follows HAL's underscore
 // convention for protocol metadata and coexists with _links and _embedded.

@@ -2,6 +2,7 @@ package vdp
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -108,6 +109,91 @@ func TestParse(t *testing.T) {
 				t.Errorf("Parse(%s) succeeded, want error", tc.doc)
 			}
 		})
+	}
+}
+
+// §3.6: type and integrity are advisory template metadata, carried alongside
+// template and preserved through a round trip.
+func TestTemplateMetadataRoundTrip(t *testing.T) {
+	const doc = `{"template":"https://e.com/card","type":"text/x-qute","integrity":"sha384-oqVuAfXRKap7fdgcCY5uykM6+R9GqQ8K/uxy9rx7HNQlGYl1kPzQho1wx4JwY8wC"}`
+	var vd ViewDescriptor
+	if err := json.Unmarshal([]byte(doc), &vd); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if vd.Type != "text/x-qute" {
+		t.Errorf("Type = %q", vd.Type)
+	}
+	if !strings.HasPrefix(vd.Integrity, "sha384-") {
+		t.Errorf("Integrity = %q", vd.Integrity)
+	}
+	out, err := json.Marshal(vd)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(out) != doc {
+		t.Errorf("round trip:\n got %s\nwant %s", out, doc)
+	}
+}
+
+// §3.7: a slot value may be a descriptor reference — an object whose single
+// member "descriptor" holds the URL of a view descriptor resource — and the
+// form survives a round trip, also inside slot arrays.
+func TestDescriptorReferenceRoundTrip(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+	}{
+		{"reference", `{"descriptor":"https://e.com/views/nav.json"}`},
+		{"array mixing inline and reference", `[{"template":"https://e.com/a"},{"descriptor":"https://e.com/views/nav.json"}]`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var sv SlotValue
+			if err := json.Unmarshal([]byte(tc.json), &sv); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			out, err := json.Marshal(sv)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if string(out) != tc.json {
+				t.Errorf("round trip:\n got %s\nwant %s", out, tc.json)
+			}
+		})
+	}
+
+	var sv SlotValue
+	if err := json.Unmarshal([]byte(`{"descriptor":"https://e.com/views/nav.json"}`), &sv); err != nil {
+		t.Fatal(err)
+	}
+	if sv.Descriptors[0].Ref != "https://e.com/views/nav.json" {
+		t.Errorf("Ref = %q", sv.Descriptors[0].Ref)
+	}
+}
+
+// §3.7: a descriptor reference contains exactly the "descriptor" member.
+func TestDescriptorReferenceExclusive(t *testing.T) {
+	for _, tc := range []struct{ name, doc string }{
+		{"with template", `{"descriptor":"https://e.com/v.json","template":"https://e.com/a"}`},
+		{"with slots", `{"descriptor":"https://e.com/v.json","slots":{}}`},
+		{"with unknown member", `{"descriptor":"https://e.com/v.json","extra":1}`},
+		{"wrong type", `{"descriptor":42}`},
+		{"empty URL", `{"descriptor":""}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sv SlotValue
+			if err := json.Unmarshal([]byte(tc.doc), &sv); err == nil {
+				t.Errorf("slot %s was accepted, want error", tc.doc)
+			}
+		})
+	}
+}
+
+// §3.7: the root of a view descriptor resource must not be a reference —
+// references are valid only as slot values.
+func TestParseRejectsRootReference(t *testing.T) {
+	if _, err := Parse([]byte(`{"descriptor":"https://e.com/views/nav.json"}`)); err == nil {
+		t.Error("root-level descriptor reference was accepted, want error")
 	}
 }
 

@@ -162,6 +162,23 @@ func TestExtractLinkRelativeResolution(t *testing.T) {
 	}
 }
 
+// §4.4: servers must not emit more than one view-descriptor link, but a client
+// that receives several uses the first in field order and ignores the rest.
+func TestExtractFirstLinkWins(t *testing.T) {
+	h := http.Header{"Link": {
+		FormatLinkHeader("https://e.com/views/first.json"),
+		FormatLinkHeader("https://e.com/views/second.json"),
+	}}
+	resp := mkResponse(t, "https://e.com/api/dashboard", "application/json", h)
+	got, err := Extract(resp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DescriptorURL != "https://e.com/views/first.json" {
+		t.Errorf("descriptor URL = %q, want the first link", got.DescriptorURL)
+	}
+}
+
 // RFC 8288 Link headers: several links, other rels, quoted params, and commas
 // inside the URI must all parse correctly.
 func TestParseLinks(t *testing.T) {

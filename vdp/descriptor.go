@@ -3,8 +3,10 @@
 // The package is split along the same lines as the specification:
 //
 //	descriptor.go — §3 view descriptor format
-//	transport.go  — §4 transport mechanisms, §13 discovery
+//	transport.go  — §4 transport mechanisms
 //	resolve.go    — §8 client resolution algorithm, §9 error handling, §10 security
+//	integrity.go  — §3.6 template integrity verification (W3C SRI)
+//	discovery.go  — §13 discovery
 //
 // It is deliberately free of any template-engine knowledge. VDP declares which
 // templates render a response; binding data to those templates belongs to the
@@ -29,10 +31,18 @@ const Version = "0.1"
 
 // ViewDescriptor identifies a root template and its dynamic slot assignments
 // (§3.1, §3.2). Slots are recursive: each slot value is itself one or more
-// ViewDescriptors, so composition nests to arbitrary depth (§3.3).
+// descriptors, so composition nests to arbitrary depth (§3.3).
+//
+// Type and Integrity are optional template metadata (§3.6). Both describe the
+// template resource: Type is an advisory media type hint (the fetched
+// response's Content-Type stays authoritative), and Integrity is W3C
+// Subresource Integrity metadata the resolver verifies fetched template bytes
+// against.
 type ViewDescriptor struct {
-	Template string `json:"template"`
-	Slots    Slots  `json:"slots,omitempty"`
+	Template  string `json:"template"`
+	Type      string `json:"type,omitempty"`
+	Integrity string `json:"integrity,omitempty"`
+	Slots     Slots  `json:"slots,omitempty"`
 }
 
 // Slots maps slot names to their values. A slot name matches a named insertion
@@ -48,50 +58,111 @@ type MultiViewDescriptor struct {
 // DefaultView is the view name clients fall back to (§3.4).
 const DefaultView = "default"
 
-// SlotValue is either a single ViewDescriptor or an ordered array of them
-// (§3.5). The grammar admits both forms, so this type carries the distinction
-// through a round trip: a slot written as an object marshals back as an object,
-// and one written as an array marshals back as an array.
-//
-// Rendering treats the two uniformly — Descriptors is always the render order.
-type SlotValue struct {
-	Descriptors []ViewDescriptor
-	// Array reports whether this value was expressed in JSON as an array.
-	Array bool
+// SlotDescriptor is one element of a slot value (§3.8): either an inline
+// ViewDescriptor or a descriptor reference (§3.7) — the URL of a standalone
+// view descriptor resource to fetch and use in its place.
+type SlotDescriptor struct {
+	ViewDescriptor
+	// Ref is the descriptor reference URL. When set, the embedded
+	// ViewDescriptor is zero: a reference contains exactly the "descriptor"
+	// member (§3.7).
+	Ref string
 }
 
-// Single builds a SlotValue holding one descriptor, marshalled as an object.
-func Single(vd ViewDescriptor) SlotValue {
-	return SlotValue{Descriptors: []ViewDescriptor{vd}}
-}
-
-// Sequence builds a SlotValue holding descriptors rendered in order (§3.5),
-// marshalled as an array.
-func Sequence(vds ...ViewDescriptor) SlotValue {
-	return SlotValue{Descriptors: vds, Array: true}
-}
-
-// UnmarshalJSON accepts either form of the SlotValue production (§3.6):
-//
-//	SlotValue = ViewDescriptor | ViewDescriptor[]
-func (sv *SlotValue) UnmarshalJSON(b []byte) error {
-	trimmed := bytes.TrimLeft(b, " \t\r\n")
-	if len(trimmed) > 0 && trimmed[0] == '[' {
-		var vds []ViewDescriptor
-		if err := json.Unmarshal(b, &vds); err != nil {
-			return fmt.Errorf("slot array: %w", err)
+// UnmarshalJSON distinguishes the two SlotDescriptor forms by the "descriptor"
+// member (§3.7).
+func (sd *SlotDescriptor) UnmarshalJSON(b []byte) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(b, &members); err != nil {
+		return fmt.Errorf("slot: %w", err)
+	}
+	if raw, ok := members["descriptor"]; ok {
+		// §3.7: a reference contains exactly the "descriptor" member.
+		if len(members) != 1 {
+			return fmt.Errorf("descriptor reference must contain only the \"descriptor\" member")
 		}
-		if len(vds) == 0 {
-			return fmt.Errorf("slot array: must contain at least one descriptor")
+		var ref string
+		if err := json.Unmarshal(raw, &ref); err != nil {
+			return fmt.Errorf("descriptor reference: %w", err)
 		}
-		*sv = SlotValue{Descriptors: vds, Array: true}
+		if ref == "" {
+			return fmt.Errorf("descriptor reference: empty URL")
+		}
+		*sd = SlotDescriptor{Ref: ref}
 		return nil
 	}
 	var vd ViewDescriptor
 	if err := json.Unmarshal(b, &vd); err != nil {
 		return fmt.Errorf("slot: %w", err)
 	}
-	*sv = SlotValue{Descriptors: []ViewDescriptor{vd}}
+	*sd = SlotDescriptor{ViewDescriptor: vd}
+	return nil
+}
+
+// MarshalJSON writes back whichever form the descriptor holds.
+func (sd SlotDescriptor) MarshalJSON() ([]byte, error) {
+	if sd.Ref != "" {
+		return json.Marshal(struct {
+			Descriptor string `json:"descriptor"`
+		}{sd.Ref})
+	}
+	return json.Marshal(sd.ViewDescriptor)
+}
+
+// SlotValue is either a single slot descriptor or an ordered array of them
+// (§3.5, §3.8). The grammar admits both forms, so this type carries the
+// distinction through a round trip: a slot written as an object marshals back
+// as an object, and one written as an array marshals back as an array.
+//
+// Rendering treats the two uniformly — Descriptors is always the render order.
+type SlotValue struct {
+	Descriptors []SlotDescriptor
+	// Array reports whether this value was expressed in JSON as an array.
+	Array bool
+}
+
+// Single builds a SlotValue holding one inline descriptor, marshalled as an
+// object.
+func Single(vd ViewDescriptor) SlotValue {
+	return SlotValue{Descriptors: []SlotDescriptor{{ViewDescriptor: vd}}}
+}
+
+// Sequence builds a SlotValue holding descriptors rendered in order (§3.5),
+// marshalled as an array.
+func Sequence(vds ...ViewDescriptor) SlotValue {
+	sds := make([]SlotDescriptor, len(vds))
+	for i, vd := range vds {
+		sds[i] = SlotDescriptor{ViewDescriptor: vd}
+	}
+	return SlotValue{Descriptors: sds, Array: true}
+}
+
+// Reference builds a SlotValue holding one descriptor reference (§3.7).
+func Reference(url string) SlotValue {
+	return SlotValue{Descriptors: []SlotDescriptor{{Ref: url}}}
+}
+
+// UnmarshalJSON accepts either form of the SlotValue production (§3.8):
+//
+//	SlotValue = SlotDescriptor | SlotDescriptor[]
+func (sv *SlotValue) UnmarshalJSON(b []byte) error {
+	trimmed := bytes.TrimLeft(b, " \t\r\n")
+	if len(trimmed) > 0 && trimmed[0] == '[' {
+		var sds []SlotDescriptor
+		if err := json.Unmarshal(b, &sds); err != nil {
+			return fmt.Errorf("slot array: %w", err)
+		}
+		if len(sds) == 0 {
+			return fmt.Errorf("slot array: must contain at least one descriptor")
+		}
+		*sv = SlotValue{Descriptors: sds, Array: true}
+		return nil
+	}
+	var sd SlotDescriptor
+	if err := json.Unmarshal(b, &sd); err != nil {
+		return err
+	}
+	*sv = SlotValue{Descriptors: []SlotDescriptor{sd}}
 	return nil
 }
 
@@ -106,7 +177,7 @@ func (sv SlotValue) MarshalJSON() ([]byte, error) {
 	return json.Marshal(sv.Descriptors[0])
 }
 
-// Validate reports whether the descriptor satisfies the §3.6 grammar. An
+// Validate reports whether the descriptor satisfies the §3.8 grammar. An
 // invalid descriptor must be rejected by clients (§9.3).
 func (vd ViewDescriptor) Validate() error {
 	return vd.validate(nil)
@@ -122,7 +193,7 @@ func (vd ViewDescriptor) validate(path []string) error {
 	if vd.Template == "" {
 		return at(fmt.Errorf("missing required field \"template\""))
 	}
-	// §3.6: TemplateURL is a URI reference. Relative references are legal and
+	// §3.8: TemplateURL is a URI reference. Relative references are legal and
 	// resolve against a base URL at resolution time (§5.4).
 	if _, err := url.Parse(vd.Template); err != nil {
 		return at(fmt.Errorf("template %q is not a valid URI: %w", vd.Template, err))
@@ -140,6 +211,20 @@ func (vd ViewDescriptor) validate(path []string) error {
 	return nil
 }
 
+func (sd SlotDescriptor) validate(path []string) error {
+	if sd.Ref != "" {
+		// §3.7: a reference carries only the descriptor URL.
+		if sd.Template != "" || sd.Slots != nil {
+			return fmt.Errorf("slot %q: descriptor reference must not also carry template or slots", strings.Join(path, "."))
+		}
+		if _, err := url.Parse(sd.Ref); err != nil {
+			return fmt.Errorf("slot %q: descriptor reference %q is not a valid URI: %w", strings.Join(path, "."), sd.Ref, err)
+		}
+		return nil
+	}
+	return sd.ViewDescriptor.validate(path)
+}
+
 // Validate reports whether the multi-view descriptor is well-formed (§3.4).
 func (mvd MultiViewDescriptor) Validate() error {
 	if len(mvd.Views) == 0 {
@@ -153,20 +238,61 @@ func (mvd MultiViewDescriptor) Validate() error {
 	return nil
 }
 
+// slotURL names the resource a slot descriptor points at, for traces: the
+// reference URL for references, the template URL otherwise.
+func (sd SlotDescriptor) slotURL() string {
+	if sd.Ref != "" {
+		return sd.Ref
+	}
+	return sd.Template
+}
+
+// parseSingle reads a referenced view descriptor resource (§3.7). It must be a
+// single ViewDescriptor: a MultiViewDescriptor is invalid in slot context
+// (§9.3), and a reference cannot point at another reference.
+func parseSingle(b []byte) (ViewDescriptor, error) {
+	var probe struct {
+		Views      json.RawMessage `json:"views"`
+		Descriptor *string         `json:"descriptor"`
+	}
+	if err := json.Unmarshal(b, &probe); err != nil {
+		return ViewDescriptor{}, fmt.Errorf("invalid view descriptor: %w", err)
+	}
+	if probe.Views != nil {
+		return ViewDescriptor{}, fmt.Errorf("a multi-view descriptor is invalid in slot context")
+	}
+	if probe.Descriptor != nil {
+		return ViewDescriptor{}, fmt.Errorf("a descriptor reference cannot be the document root")
+	}
+	var vd ViewDescriptor
+	if err := json.Unmarshal(b, &vd); err != nil {
+		return ViewDescriptor{}, fmt.Errorf("invalid view descriptor: %w", err)
+	}
+	if err := vd.Validate(); err != nil {
+		return ViewDescriptor{}, err
+	}
+	return vd, nil
+}
+
 // Parse reads a standalone VDP document, which is either a ViewDescriptor or a
-// MultiViewDescriptor (§3.6), and returns it as a map of named views. A
+// MultiViewDescriptor (§3.8), and returns it as a map of named views. A
 // single-view document is returned under DefaultView.
 func Parse(b []byte) (map[string]ViewDescriptor, error) {
 	// The two productions are distinguished by their keys: a MultiViewDescriptor
 	// has "views" and no "template".
 	var probe struct {
-		Template *string         `json:"template"`
-		Views    json.RawMessage `json:"views"`
+		Template   *string         `json:"template"`
+		Views      json.RawMessage `json:"views"`
+		Descriptor *string         `json:"descriptor"`
 	}
 	if err := json.Unmarshal(b, &probe); err != nil {
 		return nil, fmt.Errorf("invalid view descriptor: %w", err)
 	}
 	switch {
+	case probe.Descriptor != nil:
+		// §3.7: descriptor references are valid only as slot values, never as
+		// the root of a descriptor resource or inline view.
+		return nil, fmt.Errorf("invalid view descriptor: a descriptor reference cannot be the document root")
 	case probe.Views != nil && probe.Template != nil:
 		return nil, fmt.Errorf("invalid view descriptor: has both \"template\" and \"views\"")
 	case probe.Views != nil:
@@ -188,12 +314,4 @@ func Parse(b []byte) (map[string]ViewDescriptor, error) {
 		}
 		return map[string]ViewDescriptor{DefaultView: vd}, nil
 	}
-}
-
-// DiscoveryDocument is served at /.well-known/vdp (§13.2). It lets clients
-// prefetch view descriptors and learn the trusted template allowlist (§10).
-type DiscoveryDocument struct {
-	Version                string                    `json:"version"`
-	Endpoints              map[string]ViewDescriptor `json:"endpoints,omitempty"`
-	TrustedTemplateDomains []string                  `json:"trustedTemplateDomains,omitempty"`
 }

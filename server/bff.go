@@ -32,11 +32,19 @@ type BFF struct {
 	Client *http.Client
 	// Static serves the demo's own CSS (BFF chrome, not part of VDP).
 	Static fs.FS
+	// TrustedTemplateURLs is this client's local allowlist configuration — the
+	// first and strongest source in the §10 chain. The demo leaves it empty
+	// and defers to what each origin's discovery document advertises.
+	TrustedTemplateURLs []string
 
 	// resolvers are keyed by API origin. Each one is configured from that
 	// origin's discovery document and caches templates across requests (§5.2).
 	resolvers sync.Map
 }
+
+// platform is what this client answers when a server negotiates
+// platform-specific views (§5.5): the BFF renders HTML for the web.
+const platform = "web"
 
 // Routes registers the browser-facing pages. Each maps to one API endpoint.
 func (b *BFF) Routes(mux *http.ServeMux) {
@@ -143,14 +151,17 @@ func (b *BFF) resolveAndRender(ctx context.Context, apiURL, viewName, base strin
 }
 
 // resolverFor returns the resolver for an API origin, building it from that
-// origin's discovery document on first use (§13.2).
+// origin's discovery document on first use (§13.2). The template allowlist
+// follows the §10 source chain: local configuration first, then whatever the
+// discovery document advertises, and — with neither — the resolver's built-in
+// same-origin default.
 func (b *BFF) resolverFor(ctx context.Context, base string, pt *pageTrace) (*vdp.Resolver, error) {
 	if cached, ok := b.resolvers.Load(base); ok {
 		r := cached.(*vdp.Resolver)
-		pt.Trusted = r.TrustedTemplateDomains
+		pt.Trusted = trustedForTrace(r)
 		return r, nil
 	}
-	_, body, err := b.get(ctx, base+"/.well-known/vdp", vdp.MediaType)
+	_, body, err := b.get(ctx, base+vdp.WellKnownPath, vdp.DiscoveryMediaType+", application/json")
 	if err != nil {
 		return nil, fmt.Errorf("discovery: %w", err)
 	}
@@ -158,16 +169,26 @@ func (b *BFF) resolverFor(ctx context.Context, base string, pt *pageTrace) (*vdp
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return nil, fmt.Errorf("discovery: %w", err)
 	}
-	if len(doc.TrustedTemplateDomains) == 0 {
-		// §10: an empty allowlist means no template may be rendered. Better to
-		// say so than to quietly trust everything.
-		return nil, fmt.Errorf("discovery: no trustedTemplateDomains advertised")
+	trusted := b.TrustedTemplateURLs // §10 source 1: local configuration.
+	if len(trusted) == 0 {
+		trusted = doc.TrustedTemplateURLs // §10 source 2: discovery document.
 	}
-	resolver := vdp.NewResolver(b.Client, doc.TrustedTemplateDomains)
+	// §10 source 3: with neither, the resolver applies its same-origin default.
+	resolver := vdp.NewResolver(b.Client, trusted)
+	resolver.Platform = platform // §5.5
 	actual, _ := b.resolvers.LoadOrStore(base, resolver)
 	r := actual.(*vdp.Resolver)
-	pt.Trusted = r.TrustedTemplateDomains
+	pt.Trusted = trustedForTrace(r)
 	return r, nil
+}
+
+// trustedForTrace names the allowlist for the trace panel, making the §10
+// same-origin default visible instead of showing an empty list.
+func trustedForTrace(r *vdp.Resolver) []string {
+	if len(r.TrustedTemplateURLs) == 0 {
+		return []string{"(same-origin default)"}
+	}
+	return r.TrustedTemplateURLs
 }
 
 func (b *BFF) get(ctx context.Context, rawURL, accept string) (*http.Response, []byte, error) {
@@ -176,6 +197,9 @@ func (b *BFF) get(ctx context.Context, rawURL, accept string) (*http.Response, [
 		return nil, nil, err
 	}
 	req.Header.Set("Accept", accept)
+	// §5.5: negotiation applies to whichever request returns the descriptor,
+	// which for inline transports is the API request itself.
+	req.Header.Set(vdp.HeaderPlatform, platform)
 	resp, err := b.Client.Do(req)
 	if err != nil {
 		return nil, nil, fmt.Errorf("GET %s: %w", rawURL, err)

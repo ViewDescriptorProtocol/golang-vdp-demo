@@ -19,8 +19,9 @@
     <h2>Dashboard</h2>
     <p class="tagline">A composed template tree, four levels deep.</p>
     <p class="muted">The descriptor is a standalone, cacheable resource referenced by a
-      <code>Link</code> header, and its template URLs are relative.</p>
-    <p class="spec">&sect;3.3 nesting &middot; &sect;4.1 Link header &middot; &sect;5 resources &middot; &sect;5.4 relative URLs</p>
+      <code>Link</code> header, its template URLs are relative, the nav slot is
+      filled by descriptor reference, and the chart legend is integrity-verified.</p>
+    <p class="spec">&sect;3.3 nesting &middot; &sect;3.6 integrity &middot; &sect;3.7 references &middot; &sect;4.1 Link header &middot; &sect;5.4 relative URLs</p>
   </a>
 
   <a class="demo" href="/login">
@@ -64,8 +65,11 @@
       &mdash; a slot's template 404s. The slot is skipped, the template's own default
       content shows, and the rest of the page renders. (&sect;9.1)</li>
     <li><a href="/dashboard?untrusted=1">?untrusted=1</a>
-      &mdash; a slot points at a template outside the trusted allowlist. The client
-      refuses to fetch it. (&sect;10)</li>
+      &mdash; the referenced nav descriptor names a template outside the trusted
+      allowlist. The client refuses to fetch it. (&sect;10)</li>
+    <li><a href="/dashboard?fail=integrity">?fail=integrity</a>
+      &mdash; the legend's published integrity digest cannot match its bytes.
+      Treated as a fetch failure: the slot is skipped. (&sect;3.6, &sect;9.1)</li>
     <li><a href="/dashboard?fail=root">?fail=root</a>
       &mdash; the <em>root</em> template 404s. There is no tree to compose, so the
       client falls back to the raw data. (&sect;9.4)</li>
@@ -81,13 +85,16 @@ curl -i localhost:8080/api/dashboard
 # The descriptor resource it points to (&sect;5)
 curl -i localhost:8080/views/dashboard.json
 
+# The nav descriptor it references from a slot (&sect;3.7)
+curl -i localhost:8080/views/nav.json
+
 # The shorthand header, for the single-template case (&sect;4.1)
 curl -i localhost:8080/api/login
 
 # Inline _views, offering two views of one payload (&sect;4.2)
 curl -s localhost:8080/api/products/42
 
-# Discovery: trusted template domains and prefetchable descriptors (&sect;13.2)
+# Discovery: trusted template URL prefixes and prefetchable descriptors (&sect;13.2)
 curl -s localhost:8080/.well-known/vdp
 
 # VDP support advertised on OPTIONS (&sect;13.1)

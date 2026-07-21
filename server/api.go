@@ -1,7 +1,10 @@
 package server
 
 import (
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"strings"
 
@@ -13,7 +16,12 @@ import (
 //
 // The endpoints are chosen so that between them they exercise every transport
 // the spec defines, rather than because the data is interesting.
-type API struct{}
+type API struct {
+	// Templates is the template tree the template server serves, used here
+	// only to compute integrity metadata (§3.6) — a server publishing SRI
+	// digests must know the exact bytes clients will fetch.
+	Templates fs.FS
+}
 
 // Routes registers the API, the view descriptor resources and discovery.
 func (a *API) Routes(mux *http.ServeMux) {
@@ -28,21 +36,43 @@ func (a *API) Routes(mux *http.ServeMux) {
 	// Standalone view descriptor resources (§5).
 	mux.HandleFunc("GET /views/dashboard.json", a.dashboardView)
 	mux.HandleFunc("GET /views/product-list.json", a.productListView)
+	mux.HandleFunc("GET /views/product-detail.json", a.productDetailView)
+	mux.HandleFunc("GET /views/nav.json", a.navView) // referenced from dashboard.json (§3.7)
 
 	// Discovery (§13).
 	mux.HandleFunc("GET /.well-known/vdp", a.discovery)
 	mux.HandleFunc("OPTIONS /api/", a.options)
 }
 
-// TrustedTemplateDomains is the allowlist a client should enforce (§10). The
-// demo serves templates from its own origin, so the allowlist is scoped to the
-// /templates path of the running instance.
+// TrustedTemplateURLs is the allowlist a client should enforce (§10). The demo
+// serves templates and descriptors from its own origin, so the allowlist is
+// scoped to the /templates and /views paths of the running instance — the
+// latter because descriptor reference URLs go through the same chain (§10).
 //
 // The spec requires HTTPS template URLs in production (§10). This demo runs on
 // plain http://localhost, which is the one place that carries no eavesdropping
 // risk; a real deployment must not relax this.
-func TrustedTemplateDomains(base string) []string {
-	return []string{base + "/templates"}
+func TrustedTemplateURLs(base string) []string {
+	return []string{base + "/templates/", base + "/views/"}
+}
+
+// badIntegrity is a syntactically valid sha384 digest that matches no real
+// template, published by the ?fail=integrity demo switch (§3.6).
+const badIntegrity = "sha384-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+// integrity computes W3C SRI metadata for a template file (§3.6), as a server
+// publishing integrity metadata would. An unreadable file yields no metadata
+// rather than a digest that can never match.
+func (a *API) integrity(name string) string {
+	if a.Templates == nil {
+		return ""
+	}
+	body, err := fs.ReadFile(a.Templates, "templates/"+name)
+	if err != nil {
+		return ""
+	}
+	sum := sha512.Sum384(body)
+	return "sha384-" + base64.StdEncoding.EncodeToString(sum[:])
 }
 
 func templateURL(base, path string) string {
@@ -73,12 +103,15 @@ func (a *API) dashboard(w http.ResponseWriter, r *http.Request) {
 //
 // Its template URLs are relative references, resolved against this resource's
 // own URL (§5.4 rule 1) — "../templates/layouts/sidebar.html" becomes
-// "<base>/templates/layouts/sidebar.html".
+// "<base>/templates/layouts/sidebar.html". The sidebarNav slot is filled by
+// descriptor reference (§3.7), and the chart legend carries the §3.6 template
+// metadata: an advisory type hint plus an integrity digest the client must
+// verify the fetched bytes against.
 func (a *API) dashboardView(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	layout := "../templates/layouts/sidebar.html"
 	chart := "../templates/components/charts/chart.html"
-	nav := "../templates/components/navigation/nav.html"
+	legendIntegrity := a.integrity("components/charts/chart-legend.html")
 
 	switch q.Get("fail") {
 	case "chart":
@@ -89,16 +122,23 @@ func (a *API) dashboardView(w http.ResponseWriter, r *http.Request) {
 		// §9.4 rule 2: the root template fails, so nothing can be composed and
 		// the client falls back to the raw data.
 		layout = "../templates/layouts/does-not-exist.html"
+	case "integrity":
+		// §3.6: a digest that cannot match. The client must treat the legend
+		// as a fetch failure and skip that slot (§9.1).
+		legendIntegrity = badIntegrity
 	}
-	if q.Has("untrusted") {
-		// §10: outside the trusted allowlist. The client must refuse to fetch it.
-		nav = "https://evil.example.com/templates/nav.html"
+
+	// §3.7: the reference resolves against this resource's own URL, and the
+	// demo switches ride along so nav.json can honor ?untrusted.
+	nav := "nav.json"
+	if raw := r.URL.RawQuery; raw != "" {
+		nav += "?" + raw
 	}
 
 	view := vdp.ViewDescriptor{
 		Template: layout,
 		Slots: vdp.Slots{
-			"sidebarNav": vdp.Single(vdp.ViewDescriptor{Template: nav}),
+			"sidebarNav": vdp.Reference(nav),
 			"mainContent": vdp.Single(vdp.ViewDescriptor{
 				Template: "../templates/demos/dashboard.html",
 				Slots: vdp.Slots{
@@ -108,7 +148,11 @@ func (a *API) dashboardView(w http.ResponseWriter, r *http.Request) {
 						Template: chart,
 						// §3.3: a slot inside a slot inside a slot.
 						Slots: vdp.Slots{
-							"legend": vdp.Single(vdp.ViewDescriptor{Template: "../templates/components/charts/chart-legend.html"}),
+							"legend": vdp.Single(vdp.ViewDescriptor{
+								Template:  "../templates/components/charts/chart-legend.html",
+								Type:      "text/x-go-template", // §3.6: advisory; Content-Type stays authoritative
+								Integrity: legendIntegrity,
+							}),
 						},
 					}),
 				},
@@ -119,16 +163,38 @@ func (a *API) dashboardView(w http.ResponseWriter, r *http.Request) {
 	// §5.2: view descriptor resources are independently cacheable.
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	w.Header().Set("ETag", `"v1-dashboard"`)
+	w.Header().Set(vdp.HeaderVersion, vdp.Version) // §13.1
 	writeJSON(w, http.StatusOK, vdp.MediaType, view)
+}
+
+// navView is the standalone descriptor the dashboard references (§3.7): a
+// common subtree defined once, referenced from many descriptors, and cached
+// independently (§5.2). Its relative template URL resolves against this
+// resource's own URL, not the referrer's.
+func (a *API) navView(w http.ResponseWriter, r *http.Request) {
+	nav := "../templates/components/navigation/nav.html"
+	if r.URL.Query().Has("untrusted") {
+		// §10: outside the trusted allowlist. The client must refuse to fetch it.
+		nav = "https://evil.example.com/templates/nav.html"
+	}
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set(vdp.HeaderVersion, vdp.Version) // §13.1
+	writeJSON(w, http.StatusOK, vdp.MediaType, vdp.ViewDescriptor{Template: nav})
 }
 
 // product demonstrates §7.4: one response, several views, carried inline as
 // _views (§4.2). Which view is used is the client's choice — try /product/42
 // and /product/42?view=compact.
 func (a *API) product(w http.ResponseWriter, r *http.Request) {
-	base := baseURL(r)
 	data := productData()
-	data["_views"] = map[string]vdp.ViewDescriptor{
+	data["_views"] = productViews(baseURL(r))
+	writeJSON(w, http.StatusOK, "application/hal+json", data)
+}
+
+// productViews builds the product views (§7.4), shared between the inline
+// _views transport and the standalone product-detail descriptor resource.
+func productViews(base string) map[string]vdp.ViewDescriptor {
+	return map[string]vdp.ViewDescriptor{
 		vdp.DefaultView: {
 			Template: templateURL(base, "demos/product-detail.html"),
 			Slots: vdp.Slots{
@@ -140,7 +206,16 @@ func (a *API) product(w http.ResponseWriter, r *http.Request) {
 			Template: templateURL(base, "components/data-display/product-card.html"),
 		},
 	}
-	writeJSON(w, http.StatusOK, "application/hal+json", data)
+}
+
+// productDetailView serves the product views as a standalone resource. It
+// exists so the discovery document's templated /api/products/{id} entry
+// (§13.2) has a descriptor URL clients can prefetch.
+func (a *API) productDetailView(w http.ResponseWriter, r *http.Request) {
+	views := vdp.MultiViewDescriptor{Views: productViews(baseURL(r))}
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set(vdp.HeaderVersion, vdp.Version) // §13.1
+	writeJSON(w, http.StatusOK, vdp.MediaType, views)
 }
 
 // feed demonstrates §3.5: one slot filled by an ordered array of descriptors,
@@ -181,6 +256,7 @@ func (a *API) productListView(w http.ResponseWriter, r *http.Request) {
 		Template: "../templates/components/data-display/odata-table.html",
 	}
 	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set(vdp.HeaderVersion, vdp.Version) // §13.1
 	writeJSON(w, http.StatusOK, vdp.MediaType, view)
 }
 
@@ -195,20 +271,25 @@ func (a *API) statsPartial(w http.ResponseWriter, r *http.Request) {
 }
 
 // discovery serves the §13.2 well-known document, letting clients prefetch
-// descriptors and learn the trusted template allowlist before making any data
-// request.
+// descriptors and learn the trusted template URL allowlist before making any
+// data request. It is served as application/vdp-discovery+json — the document
+// is not a view descriptor and must not claim application/vdp+json (§13.2).
 func (a *API) discovery(w http.ResponseWriter, r *http.Request) {
 	base := baseURL(r)
 	doc := vdp.DiscoveryDocument{
 		Version: vdp.Version,
-		Endpoints: map[string]vdp.ViewDescriptor{
-			"/api/dashboard": {Template: base + "/views/dashboard.json"},
-			"/api/login":     {Template: templateURL(base, "components/forms/form.html")},
+		Endpoints: map[string]vdp.EndpointEntry{
+			// A relative descriptor URL, resolved against this document's own
+			// URL (§13.2), and an absolute one — both forms are legal.
+			"/api/dashboard":      {Descriptor: "/views/dashboard.json"},
+			"/api/odata/products": {Descriptor: base + "/views/product-list.json"},
+			// A Level 1 URI-Template key (§13.2): one expression, one segment.
+			"/api/products/{id}": {Descriptor: "/views/product-detail.json"},
 		},
-		TrustedTemplateDomains: TrustedTemplateDomains(base),
+		TrustedTemplateURLs: TrustedTemplateURLs(base),
 	}
 	w.Header().Set("Cache-Control", "public, max-age=3600")
-	writeJSON(w, http.StatusOK, vdp.MediaType, doc)
+	writeJSON(w, http.StatusOK, vdp.DiscoveryMediaType, doc)
 }
 
 // options advertises VDP support (§13.1).

@@ -21,7 +21,7 @@ func newDemoServer(t *testing.T) *httptest.Server {
 	root := os.DirFS("..")
 
 	mux := http.NewServeMux()
-	(&API{}).Routes(mux)
+	(&API{Templates: root}).Routes(mux)
 	(&Templates{FS: root}).Routes(mux)
 	(&BFF{Client: http.DefaultClient, Static: root}).Routes(mux)
 
@@ -146,6 +146,41 @@ func TestIntegrationRootFailureFallsBackToData(t *testing.T) {
 		"Fallback: raw API data", // the fallback panel from fallback.html
 		"Resolution failed",      // the trace records why
 		"recentActivity",         // the raw JSON data is shown instead of a blank page
+	)
+}
+
+// §3.7: the dashboard's nav slot is filled by descriptor reference. The
+// referenced resource resolves and its template renders — the nav markup is in
+// the page even though the dashboard descriptor never inlines it.
+func TestIntegrationDescriptorReference(t *testing.T) {
+	srv := newDemoServer(t)
+	status, body := get(t, srv, "/dashboard")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	mustContain(t, "/dashboard", body,
+		`class="nav"`,    // the nav template, reached only via the reference
+		"descriptor-ref", // the trace records the reference fetch
+	)
+	mustNotContain(t, "/dashboard", body, "Fallback: raw API data")
+}
+
+// §3.6: a template whose bytes do not match the published integrity metadata
+// is a fetch failure for that slot — the legend disappears, the page survives.
+func TestIntegrationIntegrityMismatchSkipsSlot(t *testing.T) {
+	srv := newDemoServer(t)
+	status, body := get(t, srv, "/dashboard?fail=integrity")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	mustContain(t, "/dashboard?fail=integrity", body,
+		"Daily revenue",     // the chart itself still renders
+		"integrity",         // the trace names the failure
+		`class="event-err"`, // ...as an error event
+	)
+	mustNotContain(t, "/dashboard?fail=integrity", body,
+		"Fallback: raw API data",
+		`class="legend"`, // the tampered legend slot is gone
 	)
 }
 
