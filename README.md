@@ -1,11 +1,12 @@
 # golang-vdp-demo
 
-A working demonstration of the [View Descriptor Protocol](https://viewdescriptorprotocol.github.io/specification/)
+A working demonstration of the [View Descriptor Protocol](https://vdprotocol.org/specification/)
 (VDP) v0.1 in Go, with no dependencies outside the standard library.
 
-VDP lets a **server declare which templates render its data**, instead of every
-client hardcoding that decision. This demo implements the protocol end to end and
-shows each part of the spec working on real HTTP.
+With VDP, each API response carries a small **view descriptor** — a JSON block
+naming which template renders the data and how sub-templates fill its slots — so
+no client has to hardcode that decision. This demo implements the protocol end to
+end and shows each part of the spec working on real HTTP.
 
 ```
 go run .        # then open http://localhost:8080
@@ -205,5 +206,5 @@ decision rather than an omission (spec Design Decisions 1–3):
 
 ## License
 
-Released under the MIT License, matching the [View Descriptor Protocol](https://viewdescriptorprotocol.github.io/specification/)
+Released under the MIT License, matching the [View Descriptor Protocol](https://vdprotocol.org/specification/)
 spec it demonstrates. See [LICENSE](./LICENSE).
