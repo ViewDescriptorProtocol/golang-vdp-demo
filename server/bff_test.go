@@ -55,7 +55,7 @@ func TestTreeHTMLNil(t *testing.T) {
 }
 
 func TestTreeHTMLSingleNode(t *testing.T) {
-	n := &vdp.Node{URL: "https://e.com/templates/layout.html"}
+	n := &vdp.Node{ID: "https://e.com/templates/layout.html"}
 	got := string(treeHTML(n, ""))
 	if !strings.Contains(got, "<code>/templates/layout.html</code>") {
 		t.Errorf("expected shortened path label, got %q", got)
@@ -69,10 +69,10 @@ func TestTreeHTMLSingleNode(t *testing.T) {
 // stable regardless of Go's map iteration order.
 func TestTreeHTMLNestedAndStable(t *testing.T) {
 	n := &vdp.Node{
-		URL: "https://e.com/layout",
+		ID: "https://e.com/layout",
 		Slots: map[string][]*vdp.Node{
-			"zeta":  {{URL: "https://e.com/z"}},
-			"alpha": {{URL: "https://e.com/a"}},
+			"zeta":  {{ID: "https://e.com/z"}},
+			"alpha": {{ID: "https://e.com/a"}},
 		},
 	}
 	got := string(treeHTML(n, ""))
@@ -88,7 +88,7 @@ func TestTreeHTMLNestedAndStable(t *testing.T) {
 // The slot label comes from the descriptor, so it is escaped like any untrusted
 // string before being written into the list.
 func TestTreeHTMLEscapesSlotLabel(t *testing.T) {
-	n := &vdp.Node{URL: "https://e.com/x"}
+	n := &vdp.Node{ID: "https://e.com/x"}
 	got := string(treeHTML(n, "<b>evil</b>"))
 	if strings.Contains(got, "<b>evil</b>") {
 		t.Errorf("slot label not escaped: %q", got)

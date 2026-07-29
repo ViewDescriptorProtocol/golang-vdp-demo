@@ -254,7 +254,7 @@ func treeHTML(n *vdp.Node, slot string) template.HTML {
 		return ""
 	}
 	var b strings.Builder
-	label := shortURL(n.URL)
+	label := shortURL(n.ID)
 	b.WriteString("<li>")
 	if slot != "" {
 		b.WriteString(`<span class="tree-slot">` + template.HTMLEscapeString(slot) + `</span> `)

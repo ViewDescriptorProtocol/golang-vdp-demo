@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -157,5 +158,34 @@ func TestBaseURLForwardedProto(t *testing.T) {
 	r.Header.Set("X-Forwarded-Proto", "https, http")
 	if got := baseURL(r); got != "https://proxied.test" {
 		t.Errorf("baseURL = %q, want https://proxied.test", got)
+	}
+}
+
+// §5.4 form (c): the OData product-list descriptor demonstrates the
+// scheme-less opaque template identifier — host-qualified, no scheme, compared
+// and cached verbatim by clients — and the discovery allowlist carries a
+// matching scheme-less entry, since §13.2 matching never crosses identifier
+// forms.
+func TestProductListViewUsesOpaqueIdentifier(t *testing.T) {
+	srv := newAPIServer(t)
+	host := strings.TrimPrefix(srv.URL, "http://")
+
+	_, body := getBody(t, srv, "/views/product-list.json")
+	var vd vdp.ViewDescriptor
+	if err := json.Unmarshal(body, &vd); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := host + "/templates/components/data-display/odata-table.html"
+	if vd.Template != want {
+		t.Errorf("template = %q, want the opaque identifier %q", vd.Template, want)
+	}
+
+	_, body = getBody(t, srv, "/.well-known/vdp")
+	var doc vdp.DiscoveryDocument
+	if err := json.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !slices.Contains(doc.TrustedTemplateURLs, host+"/templates/") {
+		t.Errorf("trustedTemplateUrls = %v, missing scheme-less entry %q", doc.TrustedTemplateURLs, host+"/templates/")
 	}
 }

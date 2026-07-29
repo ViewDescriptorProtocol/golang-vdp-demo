@@ -98,11 +98,11 @@ raw API data instead of a blank page.
 
 | Page            | Shows                                            | Spec                       |
 |-----------------|--------------------------------------------------|----------------------------|
-| `/dashboard`    | A template tree four levels deep, via `Link` header, with relative template URLs; the nav arrives by descriptor reference and the chart legend is integrity-verified | §3.3, §3.6, §3.7, §4.1, §5, §5.4, §7.2 |
+| `/dashboard`    | A template tree four levels deep, via `Link` header, with path-absolute template URIs resolved against the descriptor's URL; the nav arrives by descriptor reference and the chart legend is integrity-verified | §3.3, §3.6, §3.7, §4.1, §5, §5.4, §7.2 |
 | `/login`        | One template, no composition, `View-Template` shorthand | §3.1, §4.1, §7.1     |
 | `/product/42`   | Two views of one payload — add `?view=compact`    | §3.4, §4.2, §7.4           |
 | `/feed`         | One slot filled by three templates, in order     | §3.5                       |
-| `/odata`        | A rigid OData4 body the descriptor never touches | §4.3, §7.3                 |
+| `/odata`        | A rigid OData4 body the descriptor never touches; its template is named by a scheme-less opaque identifier, kept verbatim as the cache key | §4.3, §5.4, §6.3, §7.3     |
 
 ### Failure modes (§9)
 
@@ -197,9 +197,11 @@ decision rather than an omission (spec Design Decisions 1–3):
 - **Slot resolution order is sorted.** VDP fixes order *within* an array slot
   (§3.5) but says nothing about slots themselves, and Go's random map iteration
   would otherwise make traces differ every run.
-- **HTTPS is not used.** §10 requires HTTPS template URLs in production; this
-  demo runs on `http://localhost`, the one place that carries no eavesdropping
-  risk. A real deployment must not relax it.
+- **HTTPS is not used.** §10 requires HTTPS for any template retrieved over a
+  network; this demo runs on `http://localhost`, the loopback exception the
+  spec permits for local development — and the resolver enforces exactly that:
+  HTTPS always passes, plain HTTP only for loopback hosts. A real deployment
+  must not relax it.
 - **Sub-template output is spliced in as trusted markup**, while data rendered by
   a template is escaped normally. That split is only sound because of the
   allowlist — hence §10's insistence on it.

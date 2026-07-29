@@ -22,10 +22,10 @@ func jsonData(t *testing.T, raw string) any {
 // §6: a slot is a named insertion point filled from outside the template.
 func TestRenderSlots(t *testing.T) {
 	tree := &vdp.Node{
-		URL:  "https://e.com/layout",
+		ID:  "https://e.com/layout",
 		Body: `<main>{{slot "content"}}</main>`,
 		Slots: map[string][]*vdp.Node{
-			"content": {{URL: "https://e.com/card", Body: `<p>{{.name}}</p>`}},
+			"content": {{ID: "https://e.com/card", Body: `<p>{{.name}}</p>`}},
 		},
 	}
 	got, err := Render(tree, jsonData(t, `{"name":"Widget"}`))
@@ -40,13 +40,13 @@ func TestRenderSlots(t *testing.T) {
 // §3.5: array slots render in sequence.
 func TestRenderSlotArrayInOrder(t *testing.T) {
 	tree := &vdp.Node{
-		URL:  "https://e.com/layout",
+		ID:  "https://e.com/layout",
 		Body: `<main>{{slot "content"}}</main>`,
 		Slots: map[string][]*vdp.Node{
 			"content": {
-				{URL: "https://e.com/a", Body: `<a>`},
-				{URL: "https://e.com/b", Body: `<b>`},
-				{URL: "https://e.com/c", Body: `<c>`},
+				{ID: "https://e.com/a", Body: `<a>`},
+				{ID: "https://e.com/b", Body: `<b>`},
+				{ID: "https://e.com/c", Body: `<c>`},
 			},
 		},
 	}
@@ -63,7 +63,7 @@ func TestRenderSlotArrayInOrder(t *testing.T) {
 // failure — renders the template's own default content, not an error.
 func TestRenderUnfilledSlotUsesDefault(t *testing.T) {
 	tree := &vdp.Node{
-		URL:  "https://e.com/layout",
+		ID:  "https://e.com/layout",
 		Body: `<main>{{with slot "chart"}}{{.}}{{else}}<p>no chart</p>{{end}}</main>`,
 	}
 	got, err := Render(tree, nil)
@@ -79,10 +79,10 @@ func TestRenderUnfilledSlotUsesDefault(t *testing.T) {
 // The assignment is ignored rather than being an error.
 func TestRenderIgnoresUnmatchedSlot(t *testing.T) {
 	tree := &vdp.Node{
-		URL:  "https://e.com/layout",
+		ID:  "https://e.com/layout",
 		Body: `<main>only static content</main>`,
 		Slots: map[string][]*vdp.Node{
-			"nonexistent": {{URL: "https://e.com/x", Body: `<x>`}},
+			"nonexistent": {{ID: "https://e.com/x", Body: `<x>`}},
 		},
 	}
 	got, err := Render(tree, nil)
@@ -97,11 +97,11 @@ func TestRenderIgnoresUnmatchedSlot(t *testing.T) {
 // §9.4: a sub-template that fails at render time must not sink its parent.
 func TestRenderBrokenChildDoesNotSinkTree(t *testing.T) {
 	tree := &vdp.Node{
-		URL:  "https://e.com/layout",
+		ID:  "https://e.com/layout",
 		Body: `<main>{{slot "a"}}{{slot "b"}}</main>`,
 		Slots: map[string][]*vdp.Node{
-			"a": {{URL: "https://e.com/broken", Body: `{{.missing.deeper}}`}},
-			"b": {{URL: "https://e.com/ok", Body: `<ok>`}},
+			"a": {{ID: "https://e.com/broken", Body: `{{.missing.deeper}}`}},
+			"b": {{ID: "https://e.com/ok", Body: `<ok>`}},
 		},
 	}
 	got, err := Render(tree, jsonData(t, `{}`))
@@ -117,10 +117,10 @@ func TestRenderBrokenChildDoesNotSinkTree(t *testing.T) {
 // markup. Templates are trusted (§10), the data they render is not.
 func TestRenderEscapesDataNotTemplates(t *testing.T) {
 	tree := &vdp.Node{
-		URL:  "https://e.com/layout",
+		ID:  "https://e.com/layout",
 		Body: `<main>{{slot "content"}}</main>`,
 		Slots: map[string][]*vdp.Node{
-			"content": {{URL: "https://e.com/card", Body: `<p>{{.name}}</p>`}},
+			"content": {{ID: "https://e.com/card", Body: `<p>{{.name}}</p>`}},
 		},
 	}
 	got, err := Render(tree, jsonData(t, `{"name":"<script>alert(1)</script>"}`))
@@ -137,7 +137,7 @@ func TestRenderEscapesDataNotTemplates(t *testing.T) {
 
 // §8: rendering is bounded even if a cyclic tree somehow reaches it.
 func TestRenderDepthLimit(t *testing.T) {
-	node := &vdp.Node{URL: "https://e.com/loop", Body: `<i>{{slot "next"}}`}
+	node := &vdp.Node{ID: "https://e.com/loop", Body: `<i>{{slot "next"}}`}
 	node.Slots = map[string][]*vdp.Node{"next": {node}} // Self-referential.
 
 	got, err := Render(node, nil)

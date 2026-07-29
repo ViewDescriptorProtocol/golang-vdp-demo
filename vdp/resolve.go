@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -20,12 +22,15 @@ const DefaultMaxDepth = 10
 // or broken template server cannot exhaust memory (§10).
 const maxTemplateBytes = 1 << 20
 
-// Node is a resolved template tree node: a fetched template plus the resolved
-// sub-trees filling its slots. It is the output of the §8 algorithm and the
-// input to a renderer.
+// Node is a resolved template tree node: an obtained template plus the
+// resolved sub-trees filling its slots. It is the output of the §8 algorithm
+// and the input to a renderer.
 type Node struct {
-	// URL is the absolute template URL this node was fetched from.
-	URL string
+	// ID is the template's §5.4 identity: the URI as written for absolute and
+	// scheme-less opaque forms, or the resolved absolute URL for /-prefixed
+	// relative references. It is the key the template was cached under (§6.3),
+	// which for an opaque identifier is not the URL it was fetched from.
+	ID string
 	// Body is the template source.
 	Body string
 	// Slots maps each slot name to the nodes filling it, in render order (§3.5).
@@ -104,6 +109,11 @@ func (r *Resolver) FetchDescriptor(ctx context.Context, e *Extraction) error {
 	if e.DescriptorURL == "" {
 		return nil // Already inline.
 	}
+	if u, err := url.Parse(e.DescriptorURL); err == nil { // §10
+		if err := requireHTTPS(u); err != nil {
+			return fmt.Errorf("fetch view descriptor %s: %w", e.DescriptorURL, err)
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.DescriptorURL, nil)
 	if err != nil {
 		return err
@@ -160,28 +170,28 @@ func (r *Resolver) resolve(ctx context.Context, vd ViewDescriptor, base *url.URL
 		return nil, fmt.Errorf("maximum template nesting depth (%d) exceeded at %q", maxDepth, vd.Template)
 	}
 
-	abs, err := resolveURL(vd.Template, base) // §5.4
+	tid, err := resolveTemplateURI(vd.Template, base) // §5.4
 	if err != nil {
 		return nil, err
 	}
-	if err := r.checkTrusted(abs, base); err != nil { // §10
-		tr.add(Event{Depth: depth, Kind: "rejected", Slot: slot, URL: abs.String(), Err: err.Error()})
+	if err := r.checkTrusted(tid.id, base); err != nil { // §10
+		tr.add(Event{Depth: depth, Kind: "rejected", Slot: slot, URL: tid.id, Err: err.Error()})
 		return nil, err
 	}
 
-	body, err := r.fetchTemplate(ctx, abs, depth, slot, tr)
+	body, err := r.fetchTemplate(ctx, tid, depth, slot, tr)
 	if err != nil {
 		return nil, err
 	}
 	if vd.Integrity != "" {
 		// §3.6: a mismatch is a template fetch failure for this slot (§9.1).
 		if err := verifyIntegrity(vd.Integrity, []byte(body)); err != nil {
-			tr.add(Event{Depth: depth, Kind: "integrity-failed", Slot: slot, URL: abs.String(), Err: err.Error()})
-			return nil, fmt.Errorf("template %s: %w", abs, err)
+			tr.add(Event{Depth: depth, Kind: "integrity-failed", Slot: slot, URL: tid.id, Err: err.Error()})
+			return nil, fmt.Errorf("template %s: %w", tid.id, err)
 		}
 	}
 
-	node := &Node{URL: abs.String(), Body: body}
+	node := &Node{ID: tid.id, Body: body}
 	// Slot names are walked in sorted order. VDP fixes the order of descriptors
 	// *within* an array slot (§3.5) but says nothing about the order slots
 	// themselves are resolved in — it cannot matter, since each slot renders
@@ -219,13 +229,15 @@ func (r *Resolver) resolveSlot(ctx context.Context, sd SlotDescriptor, base *url
 		return nil, fmt.Errorf("maximum template nesting depth (%d) exceeded at reference %q", r.maxDepth(), sd.Ref)
 	}
 	// §3.7: the reference resolves against the same base as the containing
-	// descriptor's template URLs.
-	abs, err := resolveURL(sd.Ref, base)
+	// descriptor's template URIs. Unlike template URIs, a descriptor reference
+	// is always a genuine URL — a fetchable resource location — so ordinary
+	// RFC 3986 resolution applies and the §5.4 opaque form does not.
+	abs, err := resolveRefURL(sd.Ref, base)
 	if err != nil {
 		return nil, err
 	}
 	// §10: reference URLs go through the same allowlist chain as templates.
-	if err := r.checkTrusted(abs, base); err != nil {
+	if err := r.checkTrusted(abs.String(), base); err != nil {
 		tr.add(Event{Depth: depth, Kind: "rejected", Slot: slot, URL: abs.String(), Err: err.Error()})
 		return nil, err
 	}
@@ -264,6 +276,9 @@ func (r *Resolver) fetchReferencedDescriptor(ctx context.Context, u *url.URL) (V
 	if cached, ok := r.descCache.Load(key); ok {
 		return cached.(ViewDescriptor), nil
 	}
+	if err := requireHTTPS(u); err != nil { // §10
+		return ViewDescriptor{}, fmt.Errorf("fetch referenced descriptor %s: %w", key, err)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, key, nil)
 	if err != nil {
 		return ViewDescriptor{}, err
@@ -299,54 +314,174 @@ func (r *Resolver) maxDepth() int {
 	return r.MaxDepth
 }
 
-// resolveURL turns a possibly-relative template URL into an absolute one (§5.4).
-func resolveURL(ref string, base *url.URL) (*url.URL, error) {
+// templateID is a template's §5.4 identity together with the network location
+// it may be fetched from. The two coincide for absolute URIs and resolved
+// /-prefixed references; for a scheme-less opaque identifier the id stays
+// verbatim while fetch carries the scheme the client supplied (§6.3).
+type templateID struct {
+	id     string
+	fetch  *url.URL
+	opaque bool
+}
+
+// resolveTemplateURI classifies a template URI into its §5.4 form and returns
+// its identity and fetch location.
+func resolveTemplateURI(ref string, base *url.URL) (templateID, error) {
+	// Form (a): an absolute URI with a scheme. Identity as written.
+	if u, err := url.Parse(ref); err == nil && u.IsAbs() {
+		return templateID{id: ref, fetch: u}, nil
+	}
+	// Form (b): an RFC 3986 relative reference beginning with "/"
+	// (path-absolute) or "//" (network-path), resolved against the transport's
+	// base URL. Identity is the resolved absolute URL.
+	if strings.HasPrefix(ref, "/") {
+		u, err := url.Parse(ref)
+		if err != nil {
+			return templateID{}, fmt.Errorf("template %q: %w", ref, err)
+		}
+		if base != nil {
+			u = base.ResolveReference(u)
+		}
+		if !u.IsAbs() {
+			return templateID{}, fmt.Errorf("template %q is relative and no base URL is available", ref)
+		}
+		return templateID{id: u.String(), fetch: u}, nil
+	}
+	// Form (c): a scheme-less, host-qualified opaque identifier. It is NOT
+	// resolved against the base — the identifier as written is the identity —
+	// and a scheme is supplied only for the network fetch (§6.3).
+	fetch, err := opaqueFetchURL(ref)
+	if err != nil {
+		return templateID{}, err
+	}
+	return templateID{id: ref, fetch: fetch, opaque: true}, nil
+}
+
+// opaqueFetchURL builds the URL a §5.4 form (c) identifier is fetched from
+// when no local source supplies the template: the identifier with a
+// client-supplied scheme — HTTPS per §10, or plain HTTP for loopback hosts
+// (the §10 local-development exception, which is how this demo runs).
+func opaqueFetchURL(id string) (*url.URL, error) {
+	host, _, _ := strings.Cut(id, "/")
+	if host == "" {
+		return nil, fmt.Errorf("template %q: opaque identifier has no host part", id)
+	}
+	scheme := "https"
+	if isLoopbackHost(host) {
+		scheme = "http"
+	}
+	u, err := url.Parse(scheme + "://" + id)
+	if err != nil {
+		return nil, fmt.Errorf("template %q: %w", id, err)
+	}
+	return u, nil
+}
+
+// isLoopbackHost reports whether a host (possibly with port) is loopback.
+func isLoopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.IsLoopback()
+}
+
+// resolveRefURL turns a possibly-relative descriptor reference URL into an
+// absolute one per RFC 3986 (§3.7).
+func resolveRefURL(ref string, base *url.URL) (*url.URL, error) {
 	u, err := url.Parse(ref)
 	if err != nil {
-		return nil, fmt.Errorf("template %q: %w", ref, err)
+		return nil, fmt.Errorf("descriptor reference %q: %w", ref, err)
 	}
 	if base != nil {
 		u = base.ResolveReference(u)
 	}
 	if !u.IsAbs() {
-		return nil, fmt.Errorf("template %q is relative and no base URL is available", ref)
+		return nil, fmt.Errorf("descriptor reference %q is relative and no base URL is available", ref)
 	}
 	return u, nil
 }
 
-// checkTrusted enforces the template URL allowlist (§10). Rendering templates
-// from untrusted origins is a code injection risk. With no allowlist configured
-// or advertised, the §10 source chain falls back to its same-origin default:
-// only URLs sharing an origin with the descriptor's base URL are trusted, and
-// with no base either, nothing is.
-func (r *Resolver) checkTrusted(u *url.URL, base *url.URL) error {
-	if len(r.TrustedTemplateURLs) == 0 {
-		if base != nil && strings.EqualFold(u.Scheme, base.Scheme) && strings.EqualFold(u.Host, base.Host) {
-			return nil
-		}
-		return fmt.Errorf("%w: %s (same-origin default)", ErrUntrustedTemplate, u)
+// requireHTTPS enforces §10 transport security on a network fetch: HTTPS
+// always passes, and plain HTTP only for loopback hosts (the §10 exception
+// for local development, which is also how this demo runs).
+func requireHTTPS(u *url.URL) error {
+	switch {
+	case strings.EqualFold(u.Scheme, "https"):
+		return nil
+	case strings.EqualFold(u.Scheme, "http") && isLoopbackHost(u.Host):
+		return nil
 	}
-	for _, trusted := range r.TrustedTemplateURLs {
-		t, err := url.Parse(trusted)
-		if err != nil {
-			continue
-		}
-		if !strings.EqualFold(u.Scheme, t.Scheme) || !strings.EqualFold(u.Host, t.Host) {
-			continue
-		}
-		// The allowlist entry may narrow to a path prefix. Compare on segment
-		// boundaries so /templates does not also match /templates-evil.
-		prefix := strings.TrimSuffix(t.Path, "/")
-		if prefix == "" || u.Path == prefix || strings.HasPrefix(u.Path, prefix+"/") {
-			return nil
-		}
-	}
-	return fmt.Errorf("%w: %s", ErrUntrustedTemplate, u)
+	return fmt.Errorf("network retrieval requires HTTPS (loopback excepted): %s", u)
 }
 
-// fetchTemplate retrieves a template, caching bodies by absolute URL (§5.2).
-func (r *Resolver) fetchTemplate(ctx context.Context, u *url.URL, depth int, slot string, tr *Trace) (string, error) {
-	key := u.String()
+// checkTrusted enforces the template URI allowlist (§10) on a §5.4 identity.
+// Rendering templates from untrusted origins is a code injection risk.
+//
+// Matching follows §13.2: the identity must begin with an allowlist entry,
+// compared verbatim after normalization (lowercased scheme and host) and on
+// path segment boundaries, so a /templates entry does not also match
+// /templates-evil. Matching never crosses §5.4 forms — an absolute URI never
+// matches a scheme-less entry, nor an opaque identifier an absolute entry — so
+// a deployment lists each identifier form it actually serves.
+//
+// With no allowlist configured or advertised, the §10 source chain falls back
+// to its same-origin default: identities sharing an origin with the
+// descriptor's base URL are trusted (host-only comparison for opaque
+// identifiers, which carry no scheme), and with no base, nothing is.
+func (r *Resolver) checkTrusted(id string, base *url.URL) error {
+	idN, opaque := normalizeIdentity(id)
+	if len(r.TrustedTemplateURLs) == 0 {
+		if base != nil {
+			if opaque {
+				host, _, _ := strings.Cut(idN, "/")
+				if strings.EqualFold(host, base.Host) {
+					return nil
+				}
+			} else if u, err := url.Parse(id); err == nil &&
+				strings.EqualFold(u.Scheme, base.Scheme) && strings.EqualFold(u.Host, base.Host) {
+				return nil
+			}
+		}
+		return fmt.Errorf("%w: %s (same-origin default)", ErrUntrustedTemplate, id)
+	}
+	for _, trusted := range r.TrustedTemplateURLs {
+		tN, tOpaque := normalizeIdentity(trusted)
+		if tOpaque != opaque {
+			continue // §13.2: no cross-form matching.
+		}
+		prefix := strings.TrimSuffix(tN, "/")
+		if idN == prefix || strings.HasPrefix(idN, prefix+"/") {
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: %s", ErrUntrustedTemplate, id)
+}
+
+// normalizeIdentity prepares a §5.4 identity (or allowlist entry) for §13.2
+// comparison — lowercasing the scheme and host, leaving the path untouched —
+// and reports whether the value is the scheme-less opaque form.
+func normalizeIdentity(s string) (string, bool) {
+	if u, err := url.Parse(s); err == nil && u.IsAbs() {
+		return strings.ToLower(u.Scheme) + "://" + strings.ToLower(u.Host) + u.EscapedPath(), false
+	}
+	// Scheme-less: the part before the first "/" is the host.
+	host, rest, found := strings.Cut(s, "/")
+	n := strings.ToLower(host)
+	if found {
+		n += "/" + rest
+	}
+	return n, true
+}
+
+// fetchTemplate obtains a template over the network, caching bodies by §5.4
+// identity (§5.2, §6.3).
+func (r *Resolver) fetchTemplate(ctx context.Context, tid templateID, depth int, slot string, tr *Trace) (string, error) {
+	key := tid.id
 	event := Event{Depth: depth, Slot: slot, URL: key}
 
 	if cached, ok := r.cache.Load(key); ok {
@@ -361,7 +496,10 @@ func (r *Resolver) fetchTemplate(ctx context.Context, u *url.URL, depth int, slo
 		tr.add(event)
 		return "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, key, nil)
+	if err := requireHTTPS(tid.fetch); err != nil { // §10
+		return fail(fmt.Errorf("fetch template %s: %w", key, err), err.Error())
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tid.fetch.String(), nil)
 	if err != nil {
 		return "", err
 	}

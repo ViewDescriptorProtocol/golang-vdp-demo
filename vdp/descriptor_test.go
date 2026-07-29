@@ -207,3 +207,25 @@ func TestMarshalOmitsEmptySlots(t *testing.T) {
 		t.Errorf("got %s", out)
 	}
 }
+
+// §5.4 form (c)/§3.8: a host-qualified opaque identifier is a valid template
+// URI even when its host carries a port — which url.Parse alone rejects
+// ("first path segment in URL cannot contain colon").
+func TestValidateOpaqueIdentifier(t *testing.T) {
+	tests := []struct {
+		template string
+		ok       bool
+	}{
+		{"127.0.0.1:8080/templates/card", true},
+		{"example.com/templates/card", true},
+		{"/templates/card", true},
+		{"https://example.com/templates/card", true},
+		{"example.com/templates/\x00card", false},
+	}
+	for _, tc := range tests {
+		err := (ViewDescriptor{Template: tc.template}).Validate()
+		if (err == nil) != tc.ok {
+			t.Errorf("Validate(template=%q) = %v, want ok=%v", tc.template, err, tc.ok)
+		}
+	}
+}

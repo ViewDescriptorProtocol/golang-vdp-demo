@@ -193,10 +193,19 @@ func (vd ViewDescriptor) validate(path []string) error {
 	if vd.Template == "" {
 		return at(fmt.Errorf("missing required field \"template\""))
 	}
-	// §3.8: TemplateURL is a URI reference. Relative references are legal and
-	// resolve against a base URL at resolution time (§5.4).
+	// §3.8/§5.4: a template URI is an absolute URI, a /-prefixed relative
+	// reference, or a scheme-less opaque identifier. url.Parse rejects opaque
+	// identifiers whose host carries a port (host:port/...), so those are
+	// validated by parsing with a scheme supplied, as a fetch would (§6.3).
 	if _, err := url.Parse(vd.Template); err != nil {
-		return at(fmt.Errorf("template %q is not a valid URI: %w", vd.Template, err))
+		valid := false
+		if !strings.HasPrefix(vd.Template, "/") {
+			_, err2 := url.Parse("https://" + vd.Template)
+			valid = err2 == nil
+		}
+		if !valid {
+			return at(fmt.Errorf("template %q is not a valid URI: %w", vd.Template, err))
+		}
 	}
 	for name, sv := range vd.Slots {
 		if len(sv.Descriptors) == 0 {

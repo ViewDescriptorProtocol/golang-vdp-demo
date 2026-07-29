@@ -38,7 +38,7 @@ type EndpointEntry struct {
 // DescriptorURL resolves the possibly-relative descriptor URL against the URL
 // of the discovery document itself (§13.2).
 func (e EndpointEntry) DescriptorURL(docURL *url.URL) (string, error) {
-	u, err := resolveURL(e.Descriptor, docURL)
+	u, err := resolveRefURL(e.Descriptor, docURL)
 	if err != nil {
 		return "", err
 	}

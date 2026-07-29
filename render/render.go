@@ -47,7 +47,7 @@ func renderNode(node *vdp.Node, data any, depth int) (template.HTML, error) {
 		return "", fmt.Errorf("nil node")
 	}
 	if depth >= MaxRenderDepth {
-		return "", fmt.Errorf("maximum render depth (%d) exceeded at %s", MaxRenderDepth, node.URL)
+		return "", fmt.Errorf("maximum render depth (%d) exceeded at %s", MaxRenderDepth, node.ID)
 	}
 
 	funcs := template.FuncMap{
@@ -85,13 +85,13 @@ func renderNode(node *vdp.Node, data any, depth int) (template.HTML, error) {
 		funcs[name] = fn
 	}
 
-	t, err := template.New(node.URL).Funcs(funcs).Parse(node.Body)
+	t, err := template.New(node.ID).Funcs(funcs).Parse(node.Body)
 	if err != nil {
-		return "", fmt.Errorf("parse template %s: %w", node.URL, err)
+		return "", fmt.Errorf("parse template %s: %w", node.ID, err)
 	}
 	var buf strings.Builder
 	if err := t.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("execute template %s: %w", node.URL, err)
+		return "", fmt.Errorf("execute template %s: %w", node.ID, err)
 	}
 	return template.HTML(buf.String()), nil
 }

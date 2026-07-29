@@ -73,14 +73,14 @@ func TestResolveTree(t *testing.T) {
 	// A descriptor resource served from /views/, using relative template URLs.
 	base := mustParse(t, ts.URL+"/views/dashboard.json")
 	vd := ViewDescriptor{
-		Template: "../templates/layout.html",
+		Template: "/templates/layout.html",
 		Slots: Slots{
 			"main": Single(ViewDescriptor{
-				Template: "../templates/main.html",
+				Template: "/templates/main.html",
 				Slots: Slots{
 					"chart": Single(ViewDescriptor{
-						Template: "../templates/chart.html",
-						Slots:    Slots{"legend": Single(ViewDescriptor{Template: "../templates/legend.html"})},
+						Template: "/templates/chart.html",
+						Slots:    Slots{"legend": Single(ViewDescriptor{Template: "/templates/legend.html"})},
 					}),
 				},
 			}),
@@ -91,7 +91,7 @@ func TestResolveTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if root.URL != ts.URL+"/templates/layout.html" || root.Body != "layout" {
+	if root.ID != ts.URL+"/templates/layout.html" || root.Body != "layout" {
 		t.Fatalf("root = %+v", root)
 	}
 	// The deepest node proves the base did not drift at each nesting level.
@@ -261,7 +261,7 @@ func TestCheckTrustedPathBoundary(t *testing.T) {
 		{"http://cdn.example.com/templates/a.html", false}, // Scheme must match.
 	}
 	for _, tc := range tests {
-		err := r.checkTrusted(mustParse(t, tc.url), nil)
+		err := r.checkTrusted(tc.url, nil)
 		if (err == nil) != tc.allow {
 			t.Errorf("checkTrusted(%s): allowed = %v, want %v", tc.url, err == nil, tc.allow)
 		}
@@ -286,7 +286,7 @@ func TestEmptyAllowlistSameOriginDefault(t *testing.T) {
 		{"https://e.com/templates/a.html", nil, false},
 	}
 	for _, tc := range tests {
-		err := r.checkTrusted(mustParse(t, tc.url), tc.base)
+		err := r.checkTrusted(tc.url, tc.base)
 		if (err == nil) != tc.allow {
 			t.Errorf("checkTrusted(%s, base=%v): allowed = %v, want %v", tc.url, tc.base, err == nil, tc.allow)
 		}
@@ -302,7 +302,7 @@ func TestResolveSameOriginDefault(t *testing.T) {
 
 	base := mustParse(t, ts.URL+"/views/dashboard.json")
 	vd := ViewDescriptor{
-		Template: "../templates/layout.html",
+		Template: "/templates/layout.html",
 		Slots:    Slots{"nav": Single(ViewDescriptor{Template: evil.URL + "/templates/nav.html"})},
 	}
 	root, err := r.Resolve(context.Background(), vd, base, nil)
@@ -418,7 +418,7 @@ func TestResolveDescriptorReference(t *testing.T) {
 	mux.HandleFunc("/templates/nav.html", serveText("nav"))
 	mux.HandleFunc("/views/nav.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", MediaType)
-		fmt.Fprint(w, `{"template":"../templates/nav.html"}`)
+		fmt.Fprint(w, `{"template":"/templates/nav.html"}`)
 	})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
@@ -426,7 +426,7 @@ func TestResolveDescriptorReference(t *testing.T) {
 	r := NewResolver(ts.Client(), []string{ts.URL + "/"})
 	base := mustParse(t, ts.URL+"/views/dashboard.json")
 	vd := ViewDescriptor{
-		Template: "../templates/layout.html",
+		Template: "/templates/layout.html",
 		Slots:    Slots{"sidebarNav": Reference("nav.json")},
 	}
 	tr := &Trace{}
@@ -451,11 +451,11 @@ func TestResolveReferenceCycle(t *testing.T) {
 	mux.HandleFunc("/templates/a.html", serveText("a"))
 	mux.HandleFunc("/views/a.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", MediaType)
-		fmt.Fprint(w, `{"template":"../templates/a.html","slots":{"next":{"descriptor":"b.json"}}}`)
+		fmt.Fprint(w, `{"template":"/templates/a.html","slots":{"next":{"descriptor":"b.json"}}}`)
 	})
 	mux.HandleFunc("/views/b.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", MediaType)
-		fmt.Fprint(w, `{"template":"../templates/a.html","slots":{"next":{"descriptor":"a.json"}}}`)
+		fmt.Fprint(w, `{"template":"/templates/a.html","slots":{"next":{"descriptor":"a.json"}}}`)
 	})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
@@ -463,7 +463,7 @@ func TestResolveReferenceCycle(t *testing.T) {
 	r := NewResolver(ts.Client(), []string{ts.URL + "/"})
 	base := mustParse(t, ts.URL+"/views/dashboard.json")
 	vd := ViewDescriptor{
-		Template: "../templates/layout.html",
+		Template: "/templates/layout.html",
 		Slots:    Slots{"nav": Reference("a.json")},
 	}
 	tr := &Trace{}
@@ -487,7 +487,7 @@ func TestResolveReferenceMultiViewRejected(t *testing.T) {
 	mux.HandleFunc("/templates/layout.html", serveText("layout"))
 	mux.HandleFunc("/views/multi.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", MediaType)
-		fmt.Fprint(w, `{"views":{"default":{"template":"../templates/layout.html"}}}`)
+		fmt.Fprint(w, `{"views":{"default":{"template":"/templates/layout.html"}}}`)
 	})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
@@ -495,7 +495,7 @@ func TestResolveReferenceMultiViewRejected(t *testing.T) {
 	r := NewResolver(ts.Client(), []string{ts.URL + "/"})
 	base := mustParse(t, ts.URL+"/views/dashboard.json")
 	vd := ViewDescriptor{
-		Template: "../templates/layout.html",
+		Template: "/templates/layout.html",
 		Slots:    Slots{"nav": Reference("multi.json")},
 	}
 	root, err := r.Resolve(context.Background(), vd, base, nil)
@@ -515,12 +515,12 @@ func TestResolveReferenceCountsTowardDepth(t *testing.T) {
 	for i := range 6 {
 		mux.HandleFunc(fmt.Sprintf("/views/ref-%d.json", i), func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", MediaType)
-			fmt.Fprintf(w, `{"template":"../templates/a.html","slots":{"next":{"descriptor":"ref-%d.json"}}}`, i+1)
+			fmt.Fprintf(w, `{"template":"/templates/a.html","slots":{"next":{"descriptor":"ref-%d.json"}}}`, i+1)
 		})
 	}
 	mux.HandleFunc("/views/ref-6.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", MediaType)
-		fmt.Fprint(w, `{"template":"../templates/a.html"}`)
+		fmt.Fprint(w, `{"template":"/templates/a.html"}`)
 	})
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
@@ -529,7 +529,7 @@ func TestResolveReferenceCountsTowardDepth(t *testing.T) {
 	r.MaxDepth = 4
 	base := mustParse(t, ts.URL+"/views/dashboard.json")
 	vd := ViewDescriptor{
-		Template: "../templates/a.html",
+		Template: "/templates/a.html",
 		Slots:    Slots{"next": Reference("ref-0.json")},
 	}
 	tr := &Trace{}
@@ -554,7 +554,7 @@ func TestResolveReferenceUntrusted(t *testing.T) {
 	r := NewResolver(ts.Client(), []string{ts.URL + "/"})
 	base := mustParse(t, ts.URL+"/views/dashboard.json")
 	vd := ViewDescriptor{
-		Template: "../templates/layout.html",
+		Template: "/templates/layout.html",
 		Slots:    Slots{"nav": Reference(evil.URL + "/views/nav.json")},
 	}
 	root, err := r.Resolve(context.Background(), vd, base, nil)
@@ -576,7 +576,7 @@ func TestFetchDescriptorSendsPlatform(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got = r.Header.Get(HeaderPlatform)
 		w.Header().Set("Content-Type", MediaType)
-		fmt.Fprint(w, `{"template":"../templates/layout.html"}`)
+		fmt.Fprint(w, `{"template":"/templates/layout.html"}`)
 	}))
 	t.Cleanup(ts.Close)
 
@@ -677,7 +677,7 @@ func TestFetchDescriptor(t *testing.T) {
 	var descriptorURL string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", MediaType)
-		fmt.Fprint(w, `{"template":"../templates/layout.html","slots":{"main":{"template":"../templates/main.html"}}}`)
+		fmt.Fprint(w, `{"template":"/templates/layout.html","slots":{"main":{"template":"/templates/main.html"}}}`)
 	}))
 	defer ts.Close()
 	descriptorURL = ts.URL + "/views/dashboard.json"
@@ -698,7 +698,7 @@ func TestFetchDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if vd.Template != "../templates/layout.html" {
+	if vd.Template != "/templates/layout.html" {
 		t.Errorf("template = %q", vd.Template)
 	}
 }
@@ -725,4 +725,154 @@ func hasEvent(tr *Trace, kind string) bool {
 		}
 	}
 	return false
+}
+
+// §5.4 form (c): a scheme-less identifier not beginning with "/" is opaque —
+// never resolved against the base, kept verbatim as the node's identity; the
+// client supplies a scheme only to fetch it (§6.3), http being permitted here
+// because the test server is loopback (§10).
+func TestResolveOpaqueIdentifier(t *testing.T) {
+	ts := newTemplateServer(t, map[string]string{"/templates/card.html": "card"})
+	host := mustParse(t, ts.URL).Host
+	id := host + "/templates/card.html"
+
+	r := NewResolver(ts.Client(), []string{host + "/templates/"})
+	base := mustParse(t, ts.URL+"/views/dashboard.json")
+	root, err := r.Resolve(context.Background(), ViewDescriptor{Template: id}, base, nil)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if root.ID != id {
+		t.Errorf("identity = %q, want the opaque id verbatim %q", root.ID, id)
+	}
+	if root.Body != "card" {
+		t.Errorf("body = %q, want %q", root.Body, "card")
+	}
+	if n := ts.hitCount("/views/" + id); n != 0 {
+		t.Errorf("opaque id was resolved against the base and fetched %d times, want 0", n)
+	}
+}
+
+// §5.4: a scheme-less value with dot-segments fits no resolvable form — it is
+// an opaque identifier like any other non-/-prefixed value, so it can never
+// match a URL allowlist and must be rejected, not silently resolved against
+// the base as the pre-2026-07-24 spec allowed.
+func TestDotRelativeTreatedAsOpaque(t *testing.T) {
+	ts := newTemplateServer(t, map[string]string{"/templates/card.html": "card"})
+	r := NewResolver(ts.Client(), []string{ts.URL + "/templates/"})
+	base := mustParse(t, ts.URL+"/views/dashboard.json")
+
+	_, err := r.Resolve(context.Background(), ViewDescriptor{Template: "../templates/card.html"}, base, nil)
+	if !errors.Is(err, ErrUntrustedTemplate) {
+		t.Errorf("err = %v, want ErrUntrustedTemplate", err)
+	}
+	if n := ts.hitCount("/templates/card.html"); n != 0 {
+		t.Errorf("dot-relative value was resolved against the base and fetched %d times, want 0", n)
+	}
+}
+
+// §13.2: scheme-less allowlist entries (first-class since the schemas moved to
+// format: uri-reference) match opaque identifiers by verbatim prefix on
+// segment boundaries, with the host part comparing case-insensitively.
+// Matching never crosses §5.4 forms: an absolute URI does not match a
+// scheme-less entry, nor an opaque id an absolute entry — deployments list
+// each form they actually serve.
+func TestCheckTrustedSchemelessEntries(t *testing.T) {
+	r := NewResolver(nil, []string{"cdn.example.com/templates/"})
+	tests := []struct {
+		id    string
+		allow bool
+	}{
+		{"cdn.example.com/templates/card", true},
+		{"cdn.example.com/templates", true},
+		{"CDN.Example.COM/templates/card", true},
+		{"cdn.example.com/templates-evil/card", false},
+		{"cdn.example.com/other/card", false},
+		{"evil.example.com/templates/card", false},
+		{"https://cdn.example.com/templates/card", false},
+	}
+	for _, tc := range tests {
+		err := r.checkTrusted(tc.id, nil)
+		if (err == nil) != tc.allow {
+			t.Errorf("checkTrusted(%s): allowed = %v, want %v", tc.id, err == nil, tc.allow)
+		}
+	}
+
+	abs := NewResolver(nil, []string{"https://cdn.example.com/templates/"})
+	if err := abs.checkTrusted("cdn.example.com/templates/card", nil); err == nil {
+		t.Error("opaque id matched an absolute allowlist entry")
+	}
+}
+
+// §10: under the same-origin default, an opaque identifier — which has a host
+// but no scheme — is trusted iff its host part equals the base URL's host.
+func TestOpaqueSameOriginDefault(t *testing.T) {
+	r := NewResolver(nil, nil)
+	base := mustParse(t, "https://e.com/views/dashboard.json")
+	tests := []struct {
+		id    string
+		base  *url.URL
+		allow bool
+	}{
+		{"e.com/templates/card", base, true},
+		{"E.COM/templates/card", base, true},
+		{"cdn.example.com/templates/card", base, false},
+		{"e.com/templates/card", nil, false},
+	}
+	for _, tc := range tests {
+		err := r.checkTrusted(tc.id, tc.base)
+		if (err == nil) != tc.allow {
+			t.Errorf("checkTrusted(%s, base=%v): allowed = %v, want %v", tc.id, tc.base, err == nil, tc.allow)
+		}
+	}
+}
+
+// §5.2/§6.3: an opaque identifier caches under the identifier as written, so
+// resolving it twice fetches once.
+func TestResolveCachesOpaqueByIdentity(t *testing.T) {
+	ts := newTemplateServer(t, map[string]string{"/templates/card.html": "card"})
+	host := mustParse(t, ts.URL).Host
+	id := host + "/templates/card.html"
+	r := NewResolver(ts.Client(), []string{host + "/templates/"})
+
+	for range 2 {
+		if _, err := r.Resolve(context.Background(), ViewDescriptor{Template: id}, nil, nil); err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+	}
+	if n := ts.hitCount("/templates/card.html"); n != 1 {
+		t.Errorf("template fetched %d times, want 1", n)
+	}
+}
+
+// §10: network retrieval must use HTTPS; plain HTTP passes only for loopback
+// hosts (the local-development exception).
+func TestRequireHTTPS(t *testing.T) {
+	tests := []struct {
+		url string
+		ok  bool
+	}{
+		{"https://example.com/templates/card", true},
+		{"http://example.com/templates/card", false},
+		{"http://127.0.0.1:8080/templates/card", true},
+		{"http://localhost:8080/templates/card", true},
+		{"http://[::1]:8080/templates/card", true},
+		{"http://192.168.1.5/templates/card", false},
+	}
+	for _, tc := range tests {
+		err := requireHTTPS(mustParse(t, tc.url))
+		if (err == nil) != tc.ok {
+			t.Errorf("requireHTTPS(%s) = %v, want ok=%v", tc.url, err, tc.ok)
+		}
+	}
+}
+
+// §10 end to end: an http:// template URI on a non-loopback host is rejected
+// before any request is made, even when the allowlist trusts it.
+func TestResolveRejectsPlainHTTP(t *testing.T) {
+	r := NewResolver(http.DefaultClient, []string{"http://example.invalid/templates/"})
+	_, err := r.Resolve(context.Background(), ViewDescriptor{Template: "http://example.invalid/templates/card"}, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Errorf("err = %v, want an HTTPS requirement failure", err)
+	}
 }

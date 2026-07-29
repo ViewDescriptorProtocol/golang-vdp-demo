@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/ViewDescriptorProtocol/golang-vdp-demo/vdp"
@@ -48,12 +49,19 @@ func (a *API) Routes(mux *http.ServeMux) {
 // serves templates and descriptors from its own origin, so the allowlist is
 // scoped to the /templates and /views paths of the running instance — the
 // latter because descriptor reference URLs go through the same chain (§10).
+// §13.2 matching never crosses §5.4 identifier forms, so the scheme-less
+// opaque identifiers the OData descriptor uses need their own entry alongside
+// the absolute ones.
 //
-// The spec requires HTTPS template URLs in production (§10). This demo runs on
-// plain http://localhost, which is the one place that carries no eavesdropping
-// risk; a real deployment must not relax this.
+// The spec requires HTTPS for network retrieval (§10). This demo runs on plain
+// http://localhost, the one place the spec excepts; a real deployment must not
+// relax this.
 func TrustedTemplateURLs(base string) []string {
-	return []string{base + "/templates/", base + "/views/"}
+	host := base
+	if u, err := url.Parse(base); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	return []string{base + "/templates/", base + "/views/", host + "/templates/"}
 }
 
 // badIntegrity is a syntactically valid sha384 digest that matches no real
@@ -101,27 +109,28 @@ func (a *API) dashboard(w http.ResponseWriter, r *http.Request) {
 
 // dashboardView serves the standalone view descriptor resource (§5).
 //
-// Its template URLs are relative references, resolved against this resource's
-// own URL (§5.4 rule 1) — "../templates/layouts/sidebar.html" becomes
+// Its template URIs are path-absolute relative references — §5.4 form (b), the
+// only relative form the spec defines — resolved against this resource's own
+// URL (§5.4 rule 1): "/templates/layouts/sidebar.html" becomes
 // "<base>/templates/layouts/sidebar.html". The sidebarNav slot is filled by
 // descriptor reference (§3.7), and the chart legend carries the §3.6 template
 // metadata: an advisory type hint plus an integrity digest the client must
 // verify the fetched bytes against.
 func (a *API) dashboardView(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	layout := "../templates/layouts/sidebar.html"
-	chart := "../templates/components/charts/chart.html"
+	layout := "/templates/layouts/sidebar.html"
+	chart := "/templates/components/charts/chart.html"
 	legendIntegrity := a.integrity("components/charts/chart-legend.html")
 
 	switch q.Get("fail") {
 	case "chart":
 		// §9.1: a slot template that cannot be fetched. The client must skip the
 		// slot and render the rest of the tree.
-		chart = "../templates/components/charts/does-not-exist.html"
+		chart = "/templates/components/charts/does-not-exist.html"
 	case "root":
 		// §9.4 rule 2: the root template fails, so nothing can be composed and
 		// the client falls back to the raw data.
-		layout = "../templates/layouts/does-not-exist.html"
+		layout = "/templates/layouts/does-not-exist.html"
 	case "integrity":
 		// §3.6: a digest that cannot match. The client must treat the legend
 		// as a fetch failure and skip that slot (§9.1).
@@ -140,16 +149,16 @@ func (a *API) dashboardView(w http.ResponseWriter, r *http.Request) {
 		Slots: vdp.Slots{
 			"sidebarNav": vdp.Reference(nav),
 			"mainContent": vdp.Single(vdp.ViewDescriptor{
-				Template: "../templates/demos/dashboard.html",
+				Template: "/templates/demos/dashboard.html",
 				Slots: vdp.Slots{
-					"statsCards":    vdp.Single(vdp.ViewDescriptor{Template: "../templates/components/data-display/card.html"}),
-					"activityTable": vdp.Single(vdp.ViewDescriptor{Template: "../templates/components/data-display/table.html"}),
+					"statsCards":    vdp.Single(vdp.ViewDescriptor{Template: "/templates/components/data-display/card.html"}),
+					"activityTable": vdp.Single(vdp.ViewDescriptor{Template: "/templates/components/data-display/table.html"}),
 					"revenueChart": vdp.Single(vdp.ViewDescriptor{
 						Template: chart,
 						// §3.3: a slot inside a slot inside a slot.
 						Slots: vdp.Slots{
 							"legend": vdp.Single(vdp.ViewDescriptor{
-								Template:  "../templates/components/charts/chart-legend.html",
+								Template:  "/templates/components/charts/chart-legend.html",
 								Type:      "text/x-go-template", // §3.6: advisory; Content-Type stays authoritative
 								Integrity: legendIntegrity,
 							}),
@@ -169,10 +178,10 @@ func (a *API) dashboardView(w http.ResponseWriter, r *http.Request) {
 
 // navView is the standalone descriptor the dashboard references (§3.7): a
 // common subtree defined once, referenced from many descriptors, and cached
-// independently (§5.2). Its relative template URL resolves against this
-// resource's own URL, not the referrer's.
+// independently (§5.2). Its path-absolute template URI (§5.4 form (b))
+// resolves against this resource's own URL, not the referrer's.
 func (a *API) navView(w http.ResponseWriter, r *http.Request) {
-	nav := "../templates/components/navigation/nav.html"
+	nav := "/templates/components/navigation/nav.html"
 	if r.URL.Query().Has("untrusted") {
 		// §10: outside the trusted allowlist. The client must refuse to fetch it.
 		nav = "https://evil.example.com/templates/nav.html"
@@ -251,9 +260,15 @@ func (a *API) odata(w http.ResponseWriter, r *http.Request) {
 
 // productListView is the descriptor for the OData product list (§7.3): a single
 // template binding to OData's "value" array, no composition needed.
+//
+// Its template URI demonstrates §5.4 form (c) — a scheme-less, host-qualified
+// opaque identifier. The client never resolves it against a base URL: the
+// identifier as written is the template's identity and cache key, and the
+// client supplies a scheme only for the network fetch (§6.3). It is trusted
+// via the scheme-less allowlist entry in TrustedTemplateURLs.
 func (a *API) productListView(w http.ResponseWriter, r *http.Request) {
 	view := vdp.ViewDescriptor{
-		Template: "../templates/components/data-display/odata-table.html",
+		Template: r.Host + "/templates/components/data-display/odata-table.html",
 	}
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	w.Header().Set(vdp.HeaderVersion, vdp.Version) // §13.1
