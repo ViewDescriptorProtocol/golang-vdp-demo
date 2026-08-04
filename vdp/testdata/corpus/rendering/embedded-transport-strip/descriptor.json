@@ -1,0 +1,8 @@
+{
+  "template": "example.com/templates/summary",
+  "transform": {
+    "keys": {
+      "$entries": ""
+    }
+  }
+}

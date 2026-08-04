@@ -1,0 +1,11 @@
+{
+  "template": "example.com/templates/t",
+  "slots": {
+    "nav": {
+      "descriptor": "https://example.com/views/nav.json",
+      "transform": {
+        "a": "/b"
+      }
+    }
+  }
+}

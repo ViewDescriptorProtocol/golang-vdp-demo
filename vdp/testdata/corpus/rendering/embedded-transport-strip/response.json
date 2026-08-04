@@ -1,0 +1,11 @@
+{
+  "_view": {
+    "template": "example.com/templates/summary",
+    "transform": {
+      "keys": {
+        "$entries": ""
+      }
+    }
+  },
+  "revenue": 42
+}

@@ -27,7 +27,7 @@ import (
 const MediaType = "application/vdp+json"
 
 // Version is the specification version implemented here.
-const Version = "0.1"
+const Version = "0.2"
 
 // ViewDescriptor identifies a root template and its dynamic slot assignments
 // (§3.1, §3.2). Slots are recursive: each slot value is itself one or more
@@ -38,11 +38,63 @@ const Version = "0.1"
 // response's Content-Type stays authoritative), and Integrity is W3C
 // Subresource Integrity metadata the resolver verifies fetched template bytes
 // against.
+// Transform is the optional §3.8 member adapting the response representation
+// into the model this node's template expects.
 type ViewDescriptor struct {
-	Template  string `json:"template"`
-	Type      string `json:"type,omitempty"`
-	Integrity string `json:"integrity,omitempty"`
-	Slots     Slots  `json:"slots,omitempty"`
+	Template  string     `json:"template"`
+	Type      string     `json:"type,omitempty"`
+	Integrity string     `json:"integrity,omitempty"`
+	Slots     Slots      `json:"slots,omitempty"`
+	Transform *Transform `json:"transform,omitempty"`
+}
+
+// viewDescriptorMembers are the members this version understands on a view
+// descriptor node. Per §3.10, any other member not prefixed "x-" makes the
+// descriptor invalid — a client that ignored an unknown must-understand member
+// (like a 0.1 client ignoring "transform") would silently render wrong output.
+var viewDescriptorMembers = map[string]bool{
+	"template": true, "type": true, "integrity": true, "slots": true, "transform": true,
+}
+
+// checkMembers enforces the §3.10 extensibility rule for a descriptor object.
+func checkMembers(members map[string]json.RawMessage, known map[string]bool, context string) error {
+	for name := range members {
+		if !known[name] && !strings.HasPrefix(name, "x-") {
+			return fmt.Errorf("%s: unrecognized member %q (§3.10: members not prefixed \"x-\" are must-understand)", context, name)
+		}
+	}
+	return nil
+}
+
+// UnmarshalJSON reads a view descriptor node, rejecting unrecognized members
+// (§3.10) and validating any transform grammar (§3.8.1, §9.3).
+func (vd *ViewDescriptor) UnmarshalJSON(b []byte) error {
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(b, &members); err != nil {
+		return err
+	}
+	if err := checkMembers(members, viewDescriptorMembers, "view descriptor"); err != nil {
+		return err
+	}
+	type plain struct {
+		Template  string `json:"template"`
+		Type      string `json:"type,omitempty"`
+		Integrity string `json:"integrity,omitempty"`
+		Slots     Slots  `json:"slots,omitempty"`
+	}
+	var p plain
+	if err := json.Unmarshal(b, &p); err != nil {
+		return err
+	}
+	*vd = ViewDescriptor{Template: p.Template, Type: p.Type, Integrity: p.Integrity, Slots: p.Slots}
+	if raw, ok := members["transform"]; ok {
+		tr, err := ParseTransform(raw)
+		if err != nil {
+			return err // malformed transform = invalid descriptor (§9.3)
+		}
+		vd.Transform = tr
+	}
+	return nil
 }
 
 // Slots maps slot names to their values. A slot name matches a named insertion
@@ -77,9 +129,11 @@ func (sd *SlotDescriptor) UnmarshalJSON(b []byte) error {
 		return fmt.Errorf("slot: %w", err)
 	}
 	if raw, ok := members["descriptor"]; ok {
-		// §3.7: a reference contains exactly the "descriptor" member.
-		if len(members) != 1 {
-			return fmt.Errorf("descriptor reference must contain only the \"descriptor\" member")
+		// §3.7: a reference contains exactly the "descriptor" member — so a
+		// reference site can never carry template, slots or a transform.
+		// Vendor extensions ("x-", §3.10) are the one exception.
+		if err := checkMembers(members, map[string]bool{"descriptor": true}, "descriptor reference"); err != nil {
+			return err
 		}
 		var ref string
 		if err := json.Unmarshal(raw, &ref); err != nil {
@@ -305,6 +359,13 @@ func Parse(b []byte) (map[string]ViewDescriptor, error) {
 	case probe.Views != nil && probe.Template != nil:
 		return nil, fmt.Errorf("invalid view descriptor: has both \"template\" and \"views\"")
 	case probe.Views != nil:
+		var members map[string]json.RawMessage
+		if err := json.Unmarshal(b, &members); err != nil {
+			return nil, fmt.Errorf("invalid multi-view descriptor: %w", err)
+		}
+		if err := checkMembers(members, map[string]bool{"views": true}, "multi-view descriptor"); err != nil {
+			return nil, err
+		}
 		var mvd MultiViewDescriptor
 		if err := json.Unmarshal(b, &mvd); err != nil {
 			return nil, fmt.Errorf("invalid multi-view descriptor: %w", err)

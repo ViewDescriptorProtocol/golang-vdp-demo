@@ -1,0 +1,9 @@
+{
+  "rows": {
+    "$map": "/items",
+    "$to": {
+      "name": "/n",
+      "value": "/v"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "dataset": {
+    "title": "Sales"
+  },
+  "data": [
+    1,
+    2
+  ],
+  "user": {
+    "name": "Ada"
+  }
+}

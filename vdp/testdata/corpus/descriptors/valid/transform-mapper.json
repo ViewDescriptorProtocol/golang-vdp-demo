@@ -1,0 +1,6 @@
+{
+  "template": "example.com/templates/data-table",
+  "transform": {
+    "$mapper": "https://example.com/mappers/dataset-to-table"
+  }
+}

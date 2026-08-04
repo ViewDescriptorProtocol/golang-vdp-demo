@@ -1,0 +1,8 @@
+{
+  "template": "example.com/templates/t",
+  "transform": {
+    "rows": {
+      "$map": "/items"
+    }
+  }
+}

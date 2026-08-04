@@ -1,0 +1,14 @@
+{
+  "template": "example.com/templates/layout",
+  "transform": {
+    "heading": "/dataset/title"
+  },
+  "slots": {
+    "who": {
+      "template": "example.com/templates/user-badge",
+      "transform": {
+        "name": "/user/name"
+      }
+    }
+  }
+}

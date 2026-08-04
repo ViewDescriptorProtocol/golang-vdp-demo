@@ -1,0 +1,9 @@
+{
+  "list": {
+    "$entries": "/scores",
+    "$to": {
+      "label": "/key",
+      "points": "/value"
+    }
+  }
+}

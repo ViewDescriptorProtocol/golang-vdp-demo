@@ -1,0 +1,10 @@
+{
+  "root": {
+    "heading": "Sales"
+  },
+  "slots": {
+    "who": {
+      "name": "Ada"
+    }
+  }
+}

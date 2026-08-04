@@ -1,0 +1,9 @@
+{
+  "template": "example.com/templates/card",
+  "x-vendor-note": {
+    "anything": true
+  },
+  "transform": {
+    "title": "/name"
+  }
+}

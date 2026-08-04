@@ -1,0 +1,7 @@
+{
+  "template": "example.com/templates/data-table",
+  "transform": {
+    "heading": "/dataset/title",
+    "rows": "/data"
+  }
+}

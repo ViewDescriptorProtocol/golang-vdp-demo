@@ -1,0 +1,44 @@
+{
+  "template": "example.com/templates/layouts/sidebar",
+  "slots": {
+    "mainContent": {
+      "template": "example.com/templates/demos/dashboard",
+      "transform": {
+        "cards": {
+          "$map": "/items",
+          "$to": {
+            "name": "/n",
+            "value": "/v"
+          }
+        },
+        "legend": {
+          "$entries": "/stats",
+          "$to": {
+            "label": "/key",
+            "points": "/value"
+          }
+        },
+        "columns": {
+          "$get": "/columns",
+          "$default": [
+            "a",
+            "b"
+          ]
+        },
+        "total": {
+          "$count": "/items"
+        },
+        "summary": {
+          "$merge": [
+            "/defaults",
+            "/overrides"
+          ]
+        },
+        "pair": [
+          "/a",
+          "/b"
+        ]
+      }
+    }
+  }
+}

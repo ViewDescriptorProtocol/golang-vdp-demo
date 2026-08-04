@@ -1,0 +1,10 @@
+{
+  "root": {
+    "keys": [
+      {
+        "key": "revenue",
+        "value": 42
+      }
+    ]
+  }
+}

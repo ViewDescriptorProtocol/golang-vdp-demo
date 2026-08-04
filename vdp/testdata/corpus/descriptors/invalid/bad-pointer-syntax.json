@@ -1,0 +1,7 @@
+{
+  "template": "example.com/templates/t",
+  "transform": {
+    "title": "no-leading-slash",
+    "other": "/a~2b"
+  }
+}

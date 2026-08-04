@@ -1,0 +1,14 @@
+{
+  "n": {
+    "$count": "/items"
+  },
+  "m": {
+    "$count": "/attrs"
+  },
+  "x": {
+    "$count": "/s"
+  },
+  "missing": {
+    "$count": "/nope"
+  }
+}

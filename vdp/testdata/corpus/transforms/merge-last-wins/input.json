@@ -1,0 +1,10 @@
+{
+  "defaults": {
+    "a": 1,
+    "b": 1
+  },
+  "overrides": {
+    "b": 2
+  },
+  "notobj": 5
+}

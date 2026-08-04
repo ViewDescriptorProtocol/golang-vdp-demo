@@ -1,0 +1,12 @@
+{
+  "orders": {
+    "$map": "/orders",
+    "$to": {
+      "id": "/id",
+      "items": {
+        "$map": "/lines",
+        "$to": "/sku"
+      }
+    }
+  }
+}

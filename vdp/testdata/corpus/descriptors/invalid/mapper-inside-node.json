@@ -1,0 +1,8 @@
+{
+  "template": "example.com/templates/t",
+  "transform": {
+    "rows": {
+      "$mapper": "https://example.com/mappers/m"
+    }
+  }
+}

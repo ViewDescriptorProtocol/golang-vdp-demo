@@ -1,0 +1,4 @@
+{
+  "template": "example.com/templates/detail",
+  "transform": "/data/0"
+}

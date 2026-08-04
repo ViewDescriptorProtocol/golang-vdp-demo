@@ -1,0 +1,10 @@
+{
+  "name": {
+    "$get": "/user/name",
+    "$default": "anonymous"
+  },
+  "role": {
+    "$get": "/user/role",
+    "$default": "viewer"
+  }
+}
