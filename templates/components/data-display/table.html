@@ -1,12 +1,15 @@
-{{/* Activity table. Binds to the response's "recentActivity" array. */}}
+{{/*
+  Activity table. Contract: {rows, total} — rows to list, and a $count the
+  descriptor's transform derived from the same array (§3.8.1).
+*/}}
 <div class="panel">
-  <h2>Recent activity</h2>
+  <h2>Recent activity{{with .total}} ({{number .}}){{end}}</h2>
   <table>
     <thead>
       <tr><th>User</th><th>Action</th><th>Item</th><th>When</th></tr>
     </thead>
     <tbody>
-      {{range .recentActivity}}
+      {{range .rows}}
         <tr>
           <td>{{.user}}</td>
           <td><span class="tag">{{title .action}}</span></td>

@@ -26,6 +26,10 @@ type DiscoveryDocument struct {
 	// TrustedTemplateURLs is the §10 allowlist: URL prefixes template URLs
 	// must fall under. Entries should end with a trailing slash.
 	TrustedTemplateURLs []string `json:"trustedTemplateUrls,omitempty"`
+	// Mappers lists the $mapper URIs descriptors from this API may reference
+	// (§3.8.3, §13.2). Identifiers matched verbatim against the client's
+	// registered mappers — listing one does not make it fetchable.
+	Mappers []string `json:"mappers,omitempty"`
 }
 
 // EndpointEntry is one endpoints member (§13.2).

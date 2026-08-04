@@ -36,6 +36,13 @@ type Node struct {
 	// Slots maps each slot name to the nodes filling it, in render order (§3.5).
 	// Slots whose templates could not be resolved are absent (§9.1).
 	Slots map[string][]*Node
+	// Transform is the node's §3.8 transform, nil when the node declares none
+	// (the template then receives the representation unchanged).
+	Transform *Transform
+	// Mapper is the client-registered mapping function when Transform is a
+	// $mapper reference (§3.8.3). Resolution fails the slot if the mapper URI
+	// is not registered, so a resolved node's Mapper is always usable.
+	Mapper func(any) any
 }
 
 // Trace records what happened during a resolution. It exists so the demo can
@@ -49,7 +56,8 @@ type Trace struct {
 type Event struct {
 	Depth int
 	// Kind is one of "fetch", "cached", "slot-skipped", "depth-exceeded",
-	// "rejected", "integrity-failed", "descriptor-ref", "ref-cycle".
+	// "rejected", "integrity-failed", "descriptor-ref", "ref-cycle",
+	// "mapper-unknown".
 	Kind string
 	Slot string // slot being filled, empty for the root
 	URL  string
@@ -81,6 +89,11 @@ type Resolver struct {
 	Platform string
 	// MaxDepth bounds template nesting (§8). Zero means DefaultMaxDepth.
 	MaxDepth int
+	// Mappers holds the client-registered mapping code $mapper transforms may
+	// name (§3.8.3). Keys are mapper URIs, matched verbatim — a descriptor can
+	// name a mapper but never supply one (§10). Support is OPTIONAL for
+	// clients; a nil map simply means every $mapper is unknown (§9.1).
+	Mappers map[string]func(any) any
 
 	cache     sync.Map // absolute template URL -> string body (§5.2)
 	descCache sync.Map // absolute descriptor URL -> ViewDescriptor (§3.7, §5.2)
@@ -102,6 +115,22 @@ func NewResolver(client *http.Client, trustedTemplateURLs []string) *Resolver {
 // ErrUntrustedTemplate is returned when a template URL falls outside the
 // trusted URL allowlist (§10).
 var ErrUntrustedTemplate = errors.New("template URL is not in the trusted URL allowlist")
+
+// ErrUnknownMapper is returned when a $mapper transform names a URI the client
+// has not registered (§3.8.3). On a slot node this is a slot failure (§9.1);
+// at the root, the caller MUST NOT render the template against untransformed
+// input — the shapes do not match — and renders an error template only
+// (§9.4 rule 2, §9.6).
+var ErrUnknownMapper = errors.New("no registered mapper for URI")
+
+// RegisterMapper registers client-side mapping code under a mapper URI
+// (§3.8.3). The URI is an identifier compared verbatim; it is never fetched.
+func (r *Resolver) RegisterMapper(uri string, fn func(any) any) {
+	if r.Mappers == nil {
+		r.Mappers = map[string]func(any) any{}
+	}
+	r.Mappers[uri] = fn
+}
 
 // FetchDescriptor retrieves a standalone view descriptor resource (§4.1, §5).
 // It is called when Extract yields a DescriptorURL rather than inline views.
@@ -191,7 +220,19 @@ func (r *Resolver) resolve(ctx context.Context, vd ViewDescriptor, base *url.URL
 		}
 	}
 
-	node := &Node{ID: tid.id, Body: body}
+	node := &Node{ID: tid.id, Body: body, Transform: vd.Transform}
+	if uri := vd.Transform.MapperURI(); uri != "" {
+		// §3.8.3: dispatch to registered mapper code, matched verbatim. An
+		// unknown mapper fails this node — the slot is skipped by the caller
+		// (§9.1); at the root the error surfaces to the renderer, which must
+		// not fall back to untransformed input (§9.4 rule 2).
+		fn, ok := r.Mappers[uri]
+		if !ok {
+			tr.add(Event{Depth: depth, Kind: "mapper-unknown", Slot: slot, URL: uri, Err: ErrUnknownMapper.Error()})
+			return nil, fmt.Errorf("%w: %s", ErrUnknownMapper, uri)
+		}
+		node.Mapper = fn
+	}
 	// Slot names are walked in sorted order. VDP fixes the order of descriptors
 	// *within* an array slot (§3.5) but says nothing about the order slots
 	// themselves are resolved in — it cannot matter, since each slot renders

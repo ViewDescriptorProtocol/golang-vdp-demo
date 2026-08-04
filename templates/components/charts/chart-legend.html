@@ -1,5 +1,10 @@
-{{/* Legend, filling the chart's nested "legend" slot (depth 4 of the tree). */}}
+{{/*
+  Legend, filling the chart's nested "legend" slot (depth 4 of the tree).
+  Contract: {series, values}. Its transform reads the ORIGINAL response, not
+  the chart's model — independent projection (§3.8.2) is what lets it see
+  chartData even though the chart's own transform discarded the wrapper.
+*/}}
 <ul class="legend">
-  <li><span class="swatch"></span>{{.chartData.series}}</li>
-  <li class="muted">Peak {{number (maxOf .chartData.values)}}</li>
+  <li><span class="swatch"></span>{{.series}}</li>
+  <li class="muted">Peak {{number (maxOf .values)}}</li>
 </ul>

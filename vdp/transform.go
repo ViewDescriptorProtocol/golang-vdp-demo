@@ -14,8 +14,8 @@ import (
 type Transform struct {
 	kind transformKind
 
-	pointer string       // kindPointer
-	keys    []string     // kindMapping: output member order
+	pointer string   // kindPointer
+	keys    []string // kindMapping: output member order
 	members map[string]*Transform
 	list    []*Transform // kindList
 	mapPtr  string       // kindProjection: $map
@@ -41,13 +41,6 @@ const (
 	kindMerge
 	kindMapper
 )
-
-// constructKeys are the reserved $-members of the transform grammar (§3.8.1).
-// Any other $-prefixed mapping key is a malformed transform (§9.3).
-var constructKeys = map[string]bool{
-	"$map": true, "$to": true, "$entries": true, "$get": true,
-	"$default": true, "$count": true, "$merge": true, "$mapper": true,
-}
 
 // MapperURI returns the $mapper identifier when the transform is a mapper
 // reference (§3.8.3), and "" otherwise.

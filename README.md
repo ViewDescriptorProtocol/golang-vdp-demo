@@ -1,7 +1,7 @@
 # golang-vdp-demo
 
 A working demonstration of the [View Descriptor Protocol](https://vdprotocol.org/specification/)
-(VDP) v0.1 in Go, with no dependencies outside the standard library.
+(VDP) v0.2 in Go, with no dependencies outside the standard library.
 
 With VDP, each API response carries a small **view descriptor** — a JSON block
 naming which template renders the data and how sub-templates fill its slots — so
@@ -179,9 +179,14 @@ descriptor could drive a Compose or SwiftUI client unchanged.
 Worth knowing before reading the templates, because their absence is a design
 decision rather than an omission (spec Design Decisions 1–3):
 
-- **No data binding.** Nothing tells `card.html` to read `stats` — the template
-  decides that for itself. VDP selects templates; it does not wire data to them.
-- **No template parameters.** No `{"compact": true}` reaches a template.
+- **Declarative reshaping only (0.2).** A descriptor node's `transform` maps
+  the response onto the template's fixed model with RFC 6901 pointers — no
+  logic, no filtering, no computation. Anything past reshaping belongs to the
+  server, the template, or client-registered `$mapper` code (the `/summary`
+  demo). Every node's transform reads the *original* response, never a
+  parent's output (§3.8.2).
+- **No template parameters.** No `{"compact": true}` reaches a template — and
+  no `$const` exists in the transform grammar for the same reason.
 - **No conditional slots.** The server sends a *different descriptor* for an
   admin than for a guest. VDP describes what to render, not when or for whom.
 

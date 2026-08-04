@@ -19,16 +19,27 @@ func jsonData(t *testing.T, raw string) any {
 	return v
 }
 
+// jsonInput parses a response representation the way the transport layer does
+// (§4.2): order-preservingly, ready for per-node transform evaluation.
+func jsonInput(t *testing.T, raw string) *vdp.JSONValue {
+	t.Helper()
+	v, err := vdp.ParseJSON([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
 // §6: a slot is a named insertion point filled from outside the template.
 func TestRenderSlots(t *testing.T) {
 	tree := &vdp.Node{
-		ID:  "https://e.com/layout",
+		ID:   "https://e.com/layout",
 		Body: `<main>{{slot "content"}}</main>`,
 		Slots: map[string][]*vdp.Node{
 			"content": {{ID: "https://e.com/card", Body: `<p>{{.name}}</p>`}},
 		},
 	}
-	got, err := Render(tree, jsonData(t, `{"name":"Widget"}`))
+	got, err := Render(tree, jsonInput(t, `{"name":"Widget"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +51,7 @@ func TestRenderSlots(t *testing.T) {
 // §3.5: array slots render in sequence.
 func TestRenderSlotArrayInOrder(t *testing.T) {
 	tree := &vdp.Node{
-		ID:  "https://e.com/layout",
+		ID:   "https://e.com/layout",
 		Body: `<main>{{slot "content"}}</main>`,
 		Slots: map[string][]*vdp.Node{
 			"content": {
@@ -63,7 +74,7 @@ func TestRenderSlotArrayInOrder(t *testing.T) {
 // failure — renders the template's own default content, not an error.
 func TestRenderUnfilledSlotUsesDefault(t *testing.T) {
 	tree := &vdp.Node{
-		ID:  "https://e.com/layout",
+		ID:   "https://e.com/layout",
 		Body: `<main>{{with slot "chart"}}{{.}}{{else}}<p>no chart</p>{{end}}</main>`,
 	}
 	got, err := Render(tree, nil)
@@ -79,7 +90,7 @@ func TestRenderUnfilledSlotUsesDefault(t *testing.T) {
 // The assignment is ignored rather than being an error.
 func TestRenderIgnoresUnmatchedSlot(t *testing.T) {
 	tree := &vdp.Node{
-		ID:  "https://e.com/layout",
+		ID:   "https://e.com/layout",
 		Body: `<main>only static content</main>`,
 		Slots: map[string][]*vdp.Node{
 			"nonexistent": {{ID: "https://e.com/x", Body: `<x>`}},
@@ -97,14 +108,14 @@ func TestRenderIgnoresUnmatchedSlot(t *testing.T) {
 // §9.4: a sub-template that fails at render time must not sink its parent.
 func TestRenderBrokenChildDoesNotSinkTree(t *testing.T) {
 	tree := &vdp.Node{
-		ID:  "https://e.com/layout",
+		ID:   "https://e.com/layout",
 		Body: `<main>{{slot "a"}}{{slot "b"}}</main>`,
 		Slots: map[string][]*vdp.Node{
 			"a": {{ID: "https://e.com/broken", Body: `{{.missing.deeper}}`}},
 			"b": {{ID: "https://e.com/ok", Body: `<ok>`}},
 		},
 	}
-	got, err := Render(tree, jsonData(t, `{}`))
+	got, err := Render(tree, jsonInput(t, `{}`))
 	if err != nil {
 		t.Fatalf("parent render should survive a broken child: %v", err)
 	}
@@ -117,13 +128,13 @@ func TestRenderBrokenChildDoesNotSinkTree(t *testing.T) {
 // markup. Templates are trusted (§10), the data they render is not.
 func TestRenderEscapesDataNotTemplates(t *testing.T) {
 	tree := &vdp.Node{
-		ID:  "https://e.com/layout",
+		ID:   "https://e.com/layout",
 		Body: `<main>{{slot "content"}}</main>`,
 		Slots: map[string][]*vdp.Node{
 			"content": {{ID: "https://e.com/card", Body: `<p>{{.name}}</p>`}},
 		},
 	}
-	got, err := Render(tree, jsonData(t, `{"name":"<script>alert(1)</script>"}`))
+	got, err := Render(tree, jsonInput(t, `{"name":"<script>alert(1)</script>"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,5 +238,57 @@ func TestMaxOf(t *testing.T) {
 	}
 	if got := maxOf("not a slice"); got != 0 {
 		t.Errorf("maxOf(string) = %v, want 0", got)
+	}
+}
+
+// §3.8/§8 (0.2): each node renders against its own model — the transform
+// output — while nodes without a transform see the representation unchanged.
+// Sibling slots project the same original input independently (§3.8.2).
+func TestRenderPerNodeModels(t *testing.T) {
+	tree := &vdp.Node{
+		ID:   "https://e.com/layout",
+		Body: `<h1>{{.title}}</h1>{{slot "who"}}{{slot "stats"}}`,
+		Slots: map[string][]*vdp.Node{
+			"who": {{
+				ID:        "https://e.com/badge",
+				Body:      `<b>{{.name}}</b>`,
+				Transform: vdp.MustTransform(`{"name": "/user/name"}`),
+			}},
+			"stats": {{
+				ID:        "https://e.com/cards",
+				Body:      `{{range .cards}}<i>{{.label}}={{.value}}</i>{{end}}`,
+				Transform: vdp.MustTransform(`{"cards": {"$entries": "/stats", "$to": {"label": "/key", "value": "/value"}}}`),
+			}},
+		},
+	}
+	// The layout node has no transform: it sees the whole representation.
+	got, err := Render(tree, jsonInput(t, `{"title":"T","user":{"name":"Ada"},"stats":{"z":1,"a":2}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `<h1>T</h1><b>Ada</b><i>z=1</i><i>a=2</i>`
+	if string(got) != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// §3.8.3: a node whose transform is a $mapper reference renders the
+// registered mapper's output.
+func TestRenderMapperModel(t *testing.T) {
+	tree := &vdp.Node{
+		ID:        "https://e.com/table",
+		Body:      `<td>{{.heading}}</td>`,
+		Transform: vdp.MustTransform(`{"$mapper": "https://e.com/mappers/m"}`),
+		Mapper: func(in any) any {
+			data := in.(map[string]any)
+			return map[string]any{"heading": data["dataset"].(map[string]any)["title"]}
+		},
+	}
+	got, err := Render(tree, jsonInput(t, `{"dataset":{"title":"Sales"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "<td>Sales</td>" {
+		t.Errorf("got %q", got)
 	}
 }

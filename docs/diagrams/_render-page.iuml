@@ -34,5 +34,5 @@ loop root template, then each slot depth-first (§8, §3.3)
   TS --> BFF : template source
 end
 
-BFF -> BFF : render the composed tree with the API data (§6)
+BFF -> BFF : render per node: each template gets its own model\n(transform output, or the response unchanged) (§3.8, §8)
 BFF --> Browser : plain HTML — the browser never learns VDP exists

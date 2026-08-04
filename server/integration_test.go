@@ -220,3 +220,62 @@ func TestIntegrationODataAnnotation(t *testing.T) {
 	mustContain(t, "/odata", body, "Widget", "Gadget")
 	mustNotContain(t, "/odata", body, "Fallback: raw API data")
 }
+
+// §3.8: the dashboard's per-slot transforms feed each template its own model.
+// The stats cards render dollar figures reshaped out of /stats, and the chart
+// title comes through the transform rather than the chartData envelope.
+func TestIntegrationDashboardTransforms(t *testing.T) {
+	srv := newDemoServer(t)
+	status, body := get(t, srv, "/dashboard")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	mustContain(t, "/dashboard", body,
+		"$48,200",       // card model: {revenue} mapped from /stats/revenue
+		"(4)",           // table model: $count of /recentActivity
+		"Daily revenue", // chart + legend models: independent projection of /chartData
+	)
+}
+
+// §3.8.3: the summary page renders through client-registered mapper code —
+// per-day rows summed into the card contract's totals.
+func TestIntegrationSummaryMapper(t *testing.T) {
+	srv := newDemoServer(t)
+	status, body := get(t, srv, "/summary")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	mustContain(t, "/summary", body,
+		"$48,200", // 12400+9800+14200+6100+5700, summed by the mapper
+		"1,847",   // users total
+	)
+	mustNotContain(t, "/summary", body, "Fallback: raw API data")
+}
+
+// §9.4 rule 2 / §9.6: an unregistered mapper on the ROOT node fails the
+// render, and the client must not fall back to showing untransformed data —
+// the shapes do not match, so raw data would be silently wrong output.
+func TestIntegrationUnknownMapperNoRawFallback(t *testing.T) {
+	srv := newDemoServer(t)
+	status, body := get(t, srv, "/summary?fail=mapper")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	mustContain(t, "/summary?fail=mapper", body, "no registered mapper")
+	mustNotContain(t, "/summary?fail=mapper", body,
+		"Fallback: raw API data", // §9.4 rule 2: never raw data here
+		"$48,200",                // nor any rendered model
+	)
+}
+
+// §14 + §3.8.2: the stats partial's representation already matches the card
+// contract, so it declares no transform — identity is the default.
+func TestIntegrationStatsPartialIdentity(t *testing.T) {
+	srv := newDemoServer(t)
+	status, body := get(t, srv, "/api/dashboard/stats")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", status)
+	}
+	mustContain(t, "/api/dashboard/stats", body, `"revenue"`, `"users"`, `"orders"`)
+	mustNotContain(t, "/api/dashboard/stats", body, `"stats"`)
+}

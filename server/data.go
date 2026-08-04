@@ -91,3 +91,18 @@ func odataProducts(base string) map[string]any {
 		},
 	}
 }
+
+// summaryData backs the $mapper demo (§3.8.3): per-day figures whose totals
+// only client-side mapping code can compute.
+func summaryData() map[string]any {
+	return map[string]any{
+		"_links": map[string]any{"self": map[string]any{"href": "/api/summary"}},
+		"days": []any{
+			map[string]any{"revenue": 12400, "users": 610, "orders": 98},
+			map[string]any{"revenue": 9800, "users": 402, "orders": 71},
+			map[string]any{"revenue": 14200, "users": 512, "orders": 88},
+			map[string]any{"revenue": 6100, "users": 201, "orders": 34},
+			map[string]any{"revenue": 5700, "users": 122, "orders": 21},
+		},
+	}
+}

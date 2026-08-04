@@ -1,22 +1,22 @@
 {{/*
-  Stat cards. Binds to the response's "stats" object.
+  Stat cards. Contract: {revenue, users, orders} — implied by this template's
+  URI (§2), the same on every platform and behind every endpoint.
 
-  Note what is NOT here: nothing told this template that it lives in the
-  "statsCards" slot, and nothing in the descriptor told it to read "stats".
-  Template selection is VDP's job; data binding is the template's (Design
-  Decision 3).
+  The descriptor's transform adapts each response to this shape (§3.8): the
+  dashboard maps /stats/*, the summary endpoint derives totals via $mapper,
+  and the stats partial already has the shape, so it declares no transform.
 */}}
 <div class="cards">
   <div class="card">
     <span class="card-label">Revenue</span>
-    <span class="card-value">{{money .stats.revenue}}</span>
+    <span class="card-value">{{money .revenue}}</span>
   </div>
   <div class="card">
     <span class="card-label">Users</span>
-    <span class="card-value">{{number .stats.users}}</span>
+    <span class="card-value">{{number .users}}</span>
   </div>
   <div class="card">
     <span class="card-label">Orders</span>
-    <span class="card-value">{{number .stats.orders}}</span>
+    <span class="card-value">{{number .orders}}</span>
   </div>
 </div>

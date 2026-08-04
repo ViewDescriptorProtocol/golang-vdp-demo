@@ -32,17 +32,34 @@ import (
 // the resolver allowed.
 const MaxRenderDepth = vdp.DefaultMaxDepth
 
-// Render executes a resolved template tree against data and returns the
-// composed HTML (§8 step 6).
+// Render executes a resolved template tree against the response
+// representation and returns the composed HTML (§8 step 6).
 //
-// Every node in the tree sees the same data. VDP does not describe which fields
-// feed which template — templates extract what they need using the engine's own
-// expressions (Design Decision 3).
-func Render(node *vdp.Node, data any) (template.HTML, error) {
-	return renderNode(node, data, 0)
+// Rendering is per node (0.2): a node that declares a transform receives
+// exactly the transform result as its model; a node without one receives the
+// representation unchanged. Every node's transform evaluates against the
+// same original input — never an ancestor's transform output (§3.8.2,
+// independent projection) — which is why slots recurse with input rather
+// than with the parent's model.
+func Render(node *vdp.Node, input *vdp.JSONValue) (template.HTML, error) {
+	return renderNode(node, input, 0)
 }
 
-func renderNode(node *vdp.Node, data any, depth int) (template.HTML, error) {
+// model produces the data a node's template executes against (§8 step 6):
+// the registered mapper's output for $mapper transforms (§3.8.3), the
+// transform result for inline transforms, or the representation unchanged.
+func model(node *vdp.Node, input *vdp.JSONValue) any {
+	switch {
+	case node.Mapper != nil:
+		return node.Mapper(input.Plain())
+	case node.Transform != nil:
+		return node.Transform.Eval(input)
+	default:
+		return input.Plain()
+	}
+}
+
+func renderNode(node *vdp.Node, input *vdp.JSONValue, depth int) (template.HTML, error) {
 	if node == nil {
 		return "", fmt.Errorf("nil node")
 	}
@@ -67,7 +84,10 @@ func renderNode(node *vdp.Node, data any, depth int) (template.HTML, error) {
 			}
 			var b strings.Builder
 			for _, child := range children { // §3.5: arrays render in order.
-				html, err := renderNode(child, data, depth+1)
+				// Independent projection (§3.8.2): the child evaluates its
+				// own transform against the original input, not this node's
+				// model.
+				html, err := renderNode(child, input, depth+1)
 				if err != nil {
 					// §9.4: one failing sub-template must not sink the tree.
 					continue
@@ -90,7 +110,7 @@ func renderNode(node *vdp.Node, data any, depth int) (template.HTML, error) {
 		return "", fmt.Errorf("parse template %s: %w", node.ID, err)
 	}
 	var buf strings.Builder
-	if err := t.Execute(&buf, data); err != nil {
+	if err := t.Execute(&buf, model(node, input)); err != nil {
 		return "", fmt.Errorf("execute template %s: %w", node.ID, err)
 	}
 	return template.HTML(buf.String()), nil

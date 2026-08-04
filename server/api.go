@@ -27,8 +27,9 @@ type API struct {
 // Routes registers the API, the view descriptor resources and discovery.
 func (a *API) Routes(mux *http.ServeMux) {
 	// Data endpoints, one per transport (§4).
-	mux.HandleFunc("GET /api/login", a.login)                  // View-Template header
-	mux.HandleFunc("GET /api/dashboard", a.dashboard)          // Link header
+	mux.HandleFunc("GET /api/login", a.login) // View-Template header
+	mux.HandleFunc("GET /api/dashboard", a.dashboard)
+	mux.HandleFunc("GET /api/summary", a.summary)              // Link header
 	mux.HandleFunc("GET /api/products/42", a.product)          // inline _views
 	mux.HandleFunc("GET /api/feed", a.feed)                    // inline _view, slot array
 	mux.HandleFunc("GET /api/odata/products", a.odata)         // OData4 annotation
@@ -151,14 +152,28 @@ func (a *API) dashboardView(w http.ResponseWriter, r *http.Request) {
 			"mainContent": vdp.Single(vdp.ViewDescriptor{
 				Template: "/templates/demos/dashboard.html",
 				Slots: vdp.Slots{
-					"statsCards":    vdp.Single(vdp.ViewDescriptor{Template: "/templates/components/data-display/card.html"}),
-					"activityTable": vdp.Single(vdp.ViewDescriptor{Template: "/templates/components/data-display/table.html"}),
+					// §3.8: each leaf slot adapts the response to its
+					// template's fixed contract. Every transform reads the
+					// original response, whatever its nesting depth (§3.8.2).
+					"statsCards": vdp.Single(vdp.ViewDescriptor{
+						Template:  "/templates/components/data-display/card.html",
+						Transform: vdp.MustTransform(`{"revenue": "/stats/revenue", "users": "/stats/users", "orders": "/stats/orders"}`),
+					}),
+					"activityTable": vdp.Single(vdp.ViewDescriptor{
+						Template:  "/templates/components/data-display/table.html",
+						Transform: vdp.MustTransform(`{"rows": "/recentActivity", "total": {"$count": "/recentActivity"}}`),
+					}),
 					"revenueChart": vdp.Single(vdp.ViewDescriptor{
-						Template: chart,
+						Template:  chart,
+						Transform: vdp.MustTransform(`{"title": "/chartData/series", "labels": "/chartData/labels", "values": "/chartData/values"}`),
 						// §3.3: a slot inside a slot inside a slot.
 						Slots: vdp.Slots{
 							"legend": vdp.Single(vdp.ViewDescriptor{
-								Template:  "/templates/components/charts/chart-legend.html",
+								Template: "/templates/components/charts/chart-legend.html",
+								// §3.8.2 independent projection: the chart's
+								// transform dropped the chartData wrapper, but
+								// the legend still reads the original response.
+								Transform: vdp.MustTransform(`{"series": "/chartData/series", "values": "/chartData/values"}`),
 								Type:      "text/x-go-template", // §3.6: advisory; Content-Type stays authoritative
 								Integrity: legendIntegrity,
 							}),
@@ -213,6 +228,8 @@ func productViews(base string) map[string]vdp.ViewDescriptor {
 		},
 		"compact": {
 			Template: templateURL(base, "components/data-display/product-card.html"),
+			// §7.4: the same response adapted for the generic card contract.
+			Transform: vdp.MustTransform(`{"title": "/name", "price": "/price", "thumbnail": "/images/0"}`),
 		},
 	}
 }
@@ -236,10 +253,22 @@ func (a *API) feed(w http.ResponseWriter, r *http.Request) {
 		Template: templateURL(base, "layouts/sidebar.html"),
 		Slots: vdp.Slots{
 			"sidebarNav": vdp.Single(vdp.ViewDescriptor{Template: templateURL(base, "components/navigation/nav.html")}),
+			// §3.5 + §3.8: array slots carry per-element transforms. The
+			// same template URIs keep the same contracts they have on the
+			// dashboard — that is what makes each URI one identity.
 			"mainContent": vdp.Sequence(
-				vdp.ViewDescriptor{Template: templateURL(base, "components/data-display/card.html")},
-				vdp.ViewDescriptor{Template: templateURL(base, "components/charts/chart.html")},
-				vdp.ViewDescriptor{Template: templateURL(base, "components/data-display/table.html")},
+				vdp.ViewDescriptor{
+					Template:  templateURL(base, "components/data-display/card.html"),
+					Transform: vdp.MustTransform(`{"revenue": "/stats/revenue", "users": "/stats/users", "orders": "/stats/orders"}`),
+				},
+				vdp.ViewDescriptor{
+					Template:  templateURL(base, "components/charts/chart.html"),
+					Transform: vdp.MustTransform(`{"title": "/chartData/series", "labels": "/chartData/labels", "values": "/chartData/values"}`),
+				},
+				vdp.ViewDescriptor{
+					Template:  templateURL(base, "components/data-display/table.html"),
+					Transform: vdp.MustTransform(`{"rows": "/recentActivity", "total": {"$count": "/recentActivity"}}`),
+				},
 			),
 		},
 	}
@@ -280,9 +309,38 @@ func (a *API) productListView(w http.ResponseWriter, r *http.Request) {
 func (a *API) statsPartial(w http.ResponseWriter, r *http.Request) {
 	base := baseURL(r)
 	w.Header().Set(vdp.HeaderViewTemplate, templateURL(base, "components/data-display/card.html"))
+	// The card template's contract is {revenue, users, orders} (§2: the URI
+	// implies the contract). This partial response already has that shape, so
+	// no transform is declared — identity is the default (§3.8.2). The
+	// View-Template shorthand fits exactly this case.
 	writeJSON(w, http.StatusOK, "application/json", map[string]any{
-		"stats": map[string]any{"revenue": 52400, "users": 1923, "orders": 347},
+		"revenue": 52400, "users": 1923, "orders": 347,
 	})
+}
+
+// SummaryMapperURI names the mapping code the summary endpoint relies on
+// (§3.8.3). Like template URIs it is an identifier first — scheme-less,
+// matched verbatim against the client's registry, never fetched.
+const SummaryMapperURI = "golang-vdp-demo/mappers/summary-totals"
+
+// summary demonstrates the §3.8.3 $mapper escape hatch. The response carries
+// per-day figures; the card template wants totals. Summing rows is
+// cross-field derivation — deliberately outside the inline transform grammar
+// (§3.8.1) — so the descriptor names client-registered mapping code instead.
+// ?fail=mapper names a URI no client registers: the root transform fails, and
+// per §9.4 rule 2 the client shows an error, never the untransformed data.
+func (a *API) summary(w http.ResponseWriter, r *http.Request) {
+	base := baseURL(r)
+	mapper := SummaryMapperURI
+	if r.URL.Query().Get("fail") == "mapper" {
+		mapper = "golang-vdp-demo/mappers/not-registered"
+	}
+	data := summaryData()
+	data["_view"] = vdp.ViewDescriptor{
+		Template:  templateURL(base, "components/data-display/card.html"),
+		Transform: vdp.MustTransform(`{"$mapper": "` + mapper + `"}`),
+	}
+	writeJSON(w, http.StatusOK, "application/hal+json", data)
 }
 
 // discovery serves the §13.2 well-known document, letting clients prefetch
@@ -302,6 +360,9 @@ func (a *API) discovery(w http.ResponseWriter, r *http.Request) {
 			"/api/products/{id}": {Descriptor: "/views/product-detail.json"},
 		},
 		TrustedTemplateURLs: TrustedTemplateURLs(base),
+		// §13.2: the $mapper URIs descriptors from this API may reference,
+		// so clients can check their registered mappers up front (§3.8.3).
+		Mappers: []string{SummaryMapperURI},
 	}
 	w.Header().Set("Cache-Control", "public, max-age=3600")
 	writeJSON(w, http.StatusOK, vdp.DiscoveryMediaType, doc)

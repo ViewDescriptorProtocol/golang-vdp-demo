@@ -54,6 +54,14 @@
       out of band.</p>
     <p class="spec">&sect;4.3 OData compatibility</p>
   </a>
+
+  <a class="demo" href="/summary">
+    <h2>Summary</h2>
+    <p class="tagline">Reshaping the grammar refuses to do.</p>
+    <p class="muted">Per-day figures summed into totals by client-registered mapper
+      code the descriptor can name but never supply.</p>
+    <p class="spec">&sect;3.8.3 <code>$mapper</code> &middot; &sect;13.2 discovery</p>
+  </a>
 </div>
 
 <div class="panel">
@@ -73,6 +81,10 @@
     <li><a href="/dashboard?fail=root">?fail=root</a>
       &mdash; the <em>root</em> template 404s. There is no tree to compose, so the
       client falls back to the raw data. (&sect;9.4)</li>
+    <li><a href="/summary?fail=mapper">?fail=mapper</a>
+      &mdash; the descriptor names a mapper this client never registered. The root
+      transform fails, and the client must <em>not</em> show the untransformed
+      data — error only. (&sect;9.4 rule 2, &sect;9.6)</li>
   </ul>
 </div>
 

@@ -63,6 +63,11 @@ type Extraction struct {
 	DescriptorURL string
 	// Base is the base URL for resolving relative template URLs (§5.4).
 	Base *url.URL
+	// TransformInput is the response representation transforms evaluate
+	// against (§3.8.2): the parsed body with any embedded _view/_views
+	// removed (§4.2). Nil for non-JSON responses — transforms then resolve
+	// every pointer to null, per the null-not-error semantics.
+	TransformInput *JSONValue
 }
 
 // View selects a named view, falling back to DefaultView when name is empty or
@@ -95,6 +100,17 @@ func (e *Extraction) View(name string) (ViewDescriptor, error) {
 func Extract(resp *http.Response, body []byte) (*Extraction, error) {
 	base := responseURL(resp)
 
+	// The transform input (§4.2): the body, parsed order-preservingly, with
+	// the embedded descriptor stripped. Parsed once here so every transport
+	// branch hands descriptors the same representation.
+	var input *JSONValue
+	if len(body) > 0 && isJSON(resp.Header.Get("Content-Type")) {
+		if v, err := ParseJSON(body); err == nil {
+			StripDescriptor(v)
+			input = v
+		}
+	}
+
 	// 1. Inline body (§4.2). Only attempt this for JSON-ish bodies; a body that
 	// isn't JSON simply carries no inline descriptor, which is not an error.
 	if len(body) > 0 && isJSON(resp.Header.Get("Content-Type")) {
@@ -109,18 +125,20 @@ func Extract(resp *http.Response, body []byte) (*Extraction, error) {
 					return nil, fmt.Errorf("_views: %w", err)
 				}
 				return &Extraction{
-					Transport: TransportInlineViews,
-					Views:     env.Views,
-					Base:      base,
+					Transport:      TransportInlineViews,
+					Views:          env.Views,
+					Base:           base,
+					TransformInput: input,
 				}, nil
 			case env.View != nil:
 				if err := env.View.Validate(); err != nil {
 					return nil, fmt.Errorf("_view: %w", err)
 				}
 				return &Extraction{
-					Transport: TransportInlineView,
-					Views:     map[string]ViewDescriptor{DefaultView: *env.View},
-					Base:      base,
+					Transport:      TransportInlineView,
+					Views:          map[string]ViewDescriptor{DefaultView: *env.View},
+					Base:           base,
+					TransformInput: input,
 				}, nil
 			}
 		}
@@ -140,9 +158,10 @@ func Extract(resp *http.Response, body []byte) (*Extraction, error) {
 			ref = base.ResolveReference(ref)
 		}
 		return &Extraction{
-			Transport:     TransportLinkHeader,
-			DescriptorURL: ref.String(),
-			Base:          ref,
+			Transport:      TransportLinkHeader,
+			DescriptorURL:  ref.String(),
+			Base:           ref,
+			TransformInput: input,
 		}, nil
 	}
 
@@ -153,9 +172,10 @@ func Extract(resp *http.Response, body []byte) (*Extraction, error) {
 			return nil, fmt.Errorf("%s: %w", HeaderViewTemplate, err)
 		}
 		return &Extraction{
-			Transport: TransportViewTemplate,
-			Views:     map[string]ViewDescriptor{DefaultView: vd},
-			Base:      base,
+			Transport:      TransportViewTemplate,
+			Views:          map[string]ViewDescriptor{DefaultView: vd},
+			Base:           base,
+			TransformInput: input,
 		}, nil
 	}
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -55,6 +56,7 @@ func (b *BFF) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /login", b.page("/api/login"))
 	mux.HandleFunc("GET /product/42", b.page("/api/products/42"))
 	mux.HandleFunc("GET /feed", b.page("/api/feed"))
+	mux.HandleFunc("GET /summary", b.page("/api/summary"))
 	mux.HandleFunc("GET /odata", b.page("/api/odata/products"))
 }
 
@@ -75,10 +77,18 @@ func (b *BFF) page(apiPath string) http.HandlerFunc {
 		html, err := b.resolveAndRender(r.Context(), apiURL, r.URL.Query().Get("view"), base, tr, pt)
 		pt.Events = tr.Events
 		if err != nil {
-			// §9.4 rule 2: the root template failed, so there is nothing to
-			// compose. Fall back to showing the raw API data rather than nothing.
 			log.Printf("vdp: %s: %v", apiURL, err)
 			pt.Error = err.Error()
+			if errors.Is(err, vdp.ErrUnknownMapper) {
+				// §9.4 rule 2 / §9.6: the root declared a transform that
+				// failed. The template's contract is the transform output, so
+				// untransformed data MUST NOT be shown in its place — that
+				// would be silently wrong output. Error shell only.
+				b.writePage(w, pt, "")
+				return
+			}
+			// §9.4 rule 2: the root template failed with no transform
+			// declared; falling back to the raw API data beats nothing.
 			b.writePage(w, pt, rawDataFallback(pt.Data))
 			return
 		}
@@ -142,12 +152,11 @@ func (b *BFF) resolveAndRender(ctx context.Context, apiURL, viewName, base strin
 	}
 	pt.Tree = treeHTML(root, "")
 
-	// Step 6: render the composed tree with the API data.
-	var data any
-	if err := json.Unmarshal(body, &data); err != nil {
-		return "", fmt.Errorf("decode API data: %w", err)
-	}
-	return render.Render(root, data)
+	// Step 6: render per node (§8): each node's template receives its own
+	// model — the transform output, or the representation unchanged. The
+	// input is the extraction's §4.2 transform input (the body with any
+	// embedded _view/_views removed).
+	return render.Render(root, extraction.TransformInput)
 }
 
 // resolverFor returns the resolver for an API origin, building it from that
@@ -176,6 +185,10 @@ func (b *BFF) resolverFor(ctx context.Context, base string, pt *pageTrace) (*vdp
 	// §10 source 3: with neither, the resolver applies its same-origin default.
 	resolver := vdp.NewResolver(b.Client, trusted)
 	resolver.Platform = platform // §5.5
+	// §3.8.3: mapper support is OPTIONAL; this client opts in with one
+	// registered mapper. The code lives here, in the client — a descriptor
+	// can name it but never supply it (§10).
+	resolver.RegisterMapper(SummaryMapperURI, summaryTotals)
 	actual, _ := b.resolvers.LoadOrStore(base, resolver)
 	r := actual.(*vdp.Resolver)
 	pt.Trusted = trustedForTrace(r)
@@ -291,4 +304,29 @@ func rawDataFallback(data []byte) template.HTML {
 		return ""
 	}
 	return template.HTML(buf.String())
+}
+
+// summaryTotals is the client-registered mapping code behind SummaryMapperURI
+// (§3.8.3): it sums the response's per-day figures into the card template's
+// {revenue, users, orders} contract. Cross-field derivation like this is
+// deliberately outside the inline transform grammar (§3.8.1).
+func summaryTotals(in any) any {
+	totals := map[string]any{"revenue": 0.0, "users": 0.0, "orders": 0.0}
+	data, ok := in.(map[string]any)
+	if !ok {
+		return totals
+	}
+	days, _ := data["days"].([]any)
+	for _, day := range days {
+		row, ok := day.(map[string]any)
+		if !ok {
+			continue
+		}
+		for key := range totals {
+			if v, ok := row[key].(float64); ok {
+				totals[key] = totals[key].(float64) + v
+			}
+		}
+	}
+	return totals
 }

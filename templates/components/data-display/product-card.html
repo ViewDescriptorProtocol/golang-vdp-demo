@@ -1,11 +1,13 @@
 {{/*
   Product card — the "compact" view of the same data (§7.4). Same response,
   different template: the server offered both, the client picked one.
+  Contract: {title, price, thumbnail}, generic on purpose — the per-view
+  transform adapts the product response to it (§3.8).
 */}}
 <div class="card product-card">
-  <figure class="frame frame-sm"><span>{{index .images 0}}</span></figure>
+  <figure class="frame frame-sm"><span>{{.thumbnail}}</span></figure>
   <div>
-    <h2>{{.name}}</h2>
+    <h2>{{.title}}</h2>
     <p class="price">{{money .price}}</p>
   </div>
 </div>

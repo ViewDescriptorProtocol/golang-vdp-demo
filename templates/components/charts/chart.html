@@ -1,15 +1,15 @@
 {{/*
-  Bar chart. Binds to the response's "chartData" object, and opens a nested
-  "legend" slot — a slot inside a slot inside a slot, which is how the tree
-  reaches arbitrary depth (§3.3).
+  Bar chart. Contract: {title, labels, values}. The descriptor's transform
+  unwrapped the response's chartData envelope (§3.8); this template no longer
+  knows or cares where the numbers lived in the API response. It opens a
+  nested "legend" slot — a slot inside a slot inside a slot (§3.3).
 */}}
-{{$labels := .chartData.labels}}
-{{$values := .chartData.values}}
-{{$peak := maxOf $values}}
+{{$labels := .labels}}
+{{$peak := maxOf .values}}
 <div class="panel">
-  <h2>{{.chartData.series}}</h2>
+  <h2>{{.title}}</h2>
   <div class="chart">
-    {{range $i, $v := $values}}
+    {{range $i, $v := .values}}
       <div class="chart-col">
         <div class="chart-bar" style="height: {{pct $v $peak}}%"></div>
         <span class="chart-label">{{index $labels $i}}</span>
